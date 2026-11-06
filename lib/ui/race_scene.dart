@@ -32,10 +32,12 @@ class _RaceSceneState extends State<RaceScene> {
   s.Scene? _scene;
   String? _error;
   final _karts = <int, _Kart>{};
+  bool _presented = false;
   late final _hud = _PlayerHud(
     () => widget.race,
     _overlay,
     tvMode: () => widget.tvMode,
+    presented: () => _presented,
   );
   double _hudElapsed = 0;
   final _clouds = <s.Node>[];
@@ -50,7 +52,9 @@ class _RaceSceneState extends State<RaceScene> {
     target: v.Vector3(0, 0, 0),
     fovRadiansY: .78,
   );
-  final _materials = <int, s.PhysicallyBasedMaterial>{};
+  final _materials = <int, s.UnlitMaterial>{};
+  s.IcosphereGeometry? _smokeGeometry;
+  List<s.Node> _kartTemplates = const [];
 
   @override
   void initState() {
@@ -76,28 +80,37 @@ class _RaceSceneState extends State<RaceScene> {
       if (!mounted) return;
       final scene = s.Scene();
       _scene = scene;
+      final android = Platform.isAndroid;
       scene.directionalLight = s.DirectionalLight(
         direction: v.Vector3(-.5, -1, .3),
-        intensity: 2.5,
-        castsShadow: true,
+        intensity: 2.4,
+        castsShadow: !android,
         shadowCasterFaces: s.ShadowCasterFaces.back,
         shadowCascadeCount: 1,
         shadowMapResolution: 1024,
+        shadowDepthBias: .08,
+        shadowNormalBias: .08,
       );
       scene.environmentSettings = s.EnvironmentSettings(
         toneMapping: s.ToneMappingMode.aces,
-        exposure: .9,
-        colorGradingEnabled: true,
+        exposure: .92,
+        colorGradingEnabled: !android,
         saturation: 1.2,
         contrast: 1.08,
-        bloomEnabled: true,
+        bloomEnabled: !android,
         bloomThreshold: 1.1,
         bloomIntensity: .16,
         bloomScatter: .7,
-        vignetteEnabled: true,
+        vignetteEnabled: !android,
         vignetteIntensity: .16,
       );
       _buildIsland(scene);
+      _kartTemplates = [
+        await s.Node.fromGlbAsset(
+          'assets/karts/kart_low_poly.glb',
+          maxTextureSize: 512,
+        ),
+      ];
       _tick(Duration.zero, 0);
       setState(() {});
     } catch (error) {
@@ -107,15 +120,14 @@ class _RaceSceneState extends State<RaceScene> {
     }
   }
 
-  s.PhysicallyBasedMaterial _material(
-    int color,
-  ) => _materials.putIfAbsent(color, () {
+  s.UnlitMaterial _material(int color) => _materials.putIfAbsent(color, () {
     final c = Color(color);
-    double linear(double x) =>
-        x <= .04045 ? x / 12.92 : math.pow((x + .055) / 1.055, 2.4).toDouble();
-    return s.PhysicallyBasedMaterial()
+    double linear(double channel) => channel <= .04045
+        ? channel / 12.92
+        : math.pow((channel + .055) / 1.055, 2.4).toDouble();
+    return s.UnlitMaterial()
       ..baseColorFactor = v.Vector4(linear(c.r), linear(c.g), linear(c.b), 1)
-      ..roughnessFactor = .75;
+      ..vertexColorWeight = 0;
   });
   s.Node _mesh(
     s.Geometry geometry,
@@ -128,6 +140,7 @@ class _RaceSceneState extends State<RaceScene> {
   }) {
     final node = s.Node(name: name, mesh: s.Mesh(geometry, _material(color)))
       ..position = v.Vector3(x, y, z)
+      ..frustumCulled = false
       ..shadowStatic = parent == null;
     (parent ?? _scene!.root).add(node);
     return node;
@@ -161,19 +174,79 @@ class _RaceSceneState extends State<RaceScene> {
     const count = 512;
     final positions = <double>[], colors = <double>[];
     final indices = <int>[];
+    final center = List<({double x, double y, double h})>.generate(count, (i) {
+      final angle = i * math.pi * 2 / count;
+      final point = _circuit.point(angle);
+      return (x: point.x, y: point.y, h: _circuit.heading(angle));
+    });
+    List<({double x, double y})> side(double lane) {
+      final limits = List<double>.filled(count, double.infinity);
+      for (var i = 0; i < count; i++) {
+        final j = (i + 1) % count;
+        final cx = center[j].x - center[i].x, cy = center[j].y - center[i].y;
+        final step = math.max(math.sqrt(cx * cx + cy * cy), 1.0);
+        final dx =
+            center[j].x -
+            math.sin(center[j].h) * lane -
+            (center[i].x - math.sin(center[i].h) * lane);
+        final dy =
+            center[j].y +
+            math.cos(center[j].h) * lane -
+            (center[i].y + math.cos(center[i].h) * lane);
+        final len = math.sqrt(dx * dx + dy * dy);
+        if (dx * cx + dy * cy >= 0 && len <= step * 2.2) continue;
+        final turn = math
+            .atan2(
+              math.sin(center[j].h - center[i].h),
+              math.cos(center[j].h - center[i].h),
+            )
+            .abs();
+        final radius = turn < .02 ? lane.abs() : step / turn * .85;
+        limits[i] = math.min(limits[i], radius);
+        limits[j] = math.min(limits[j], radius);
+      }
+      for (var pass = 0; pass < 24; pass++) {
+        final next = [...limits];
+        for (var i = 0; i < count; i++) {
+          final prev = (i + count - 1) % count, nxt = (i + 1) % count;
+          final step = math.max(
+            math.sqrt(
+              math.pow(center[i].x - center[prev].x, 2) +
+                  math.pow(center[i].y - center[prev].y, 2),
+            ),
+            1.0,
+          );
+          final grow = step * .45;
+          next[i] = math.min(
+            limits[i],
+            math.min(limits[prev] + grow, limits[nxt] + grow),
+          );
+        }
+        for (var i = 0; i < count; i++) {
+          limits[i] = next[i];
+        }
+      }
+      return List.generate(count, (i) {
+        final reach = math.min(lane.abs(), limits[i]);
+        final signed = lane.sign * reach;
+        return (
+          x: center[i].x - math.sin(center[i].h) * signed,
+          y: center[i].y + math.cos(center[i].h) * signed,
+        );
+      });
+    }
+
+    final edges = [side(left), side(right)];
     for (var i = 0; i < count; i++) {
       final base = positions.length ~/ 3;
       final c = Color(striped && (i ~/ 3).isEven ? 0xFFFDF2CF : color);
-      for (final angle in [
-        i * math.pi * 2 / count,
-        (i + 1) * math.pi * 2 / count,
-      ]) {
-        final point = _circuit.point(angle), heading = _circuit.heading(angle);
-        for (final lane in [left, right]) {
+      final next = (i + 1) % count;
+      for (final index in [i, next]) {
+        for (final edge in edges) {
           positions.addAll([
-            (point.x - math.sin(heading) * lane) / 20,
-            (_circuit.height(angle) + lift) / 20,
-            (point.y + math.cos(heading) * lane) / 20,
+            edge[index].x / 20,
+            (_circuit.height(index * math.pi * 2 / count) + lift) / 20,
+            edge[index].y / 20,
           ]);
           colors.addAll([
             math.pow(c.r, 2.2).toDouble(),
@@ -185,14 +258,22 @@ class _RaceSceneState extends State<RaceScene> {
       }
       indices.addAll([base, base + 1, base + 2, base + 1, base + 3, base + 2]);
     }
+    final normals = Float32List(positions.length);
+    for (var i = 1; i < normals.length; i += 3) {
+      normals[i] = 1;
+    }
     final material = s.PhysicallyBasedMaterial()
       ..roughnessFactor = .95
+      ..metallicFactor = 0
+      ..vertexColorWeight = 1
+      ..doubleSided = true
       ..depthLayer = striped ? (left < 0 ? 2 : 3) : 1;
     final node = s.Node(
       name: 'track-$left-$right',
       mesh: s.Mesh(
         s.MeshGeometry.fromArrays(
           positions: Float32List.fromList(positions),
+          normals: normals,
           colors: Float32List.fromList(colors),
           indices: indices,
         ),
@@ -200,6 +281,8 @@ class _RaceSceneState extends State<RaceScene> {
       ),
     );
     node.shadowStatic = true;
+    node.shadowCastingMode = s.ShadowCastingMode.off;
+    node.frustumCulled = false;
     _scene!.add(node);
   }
 
@@ -226,7 +309,7 @@ class _RaceSceneState extends State<RaceScene> {
       ),
       0xFFF0CD98,
       0,
-      -1.5,
+      -2.05,
       0,
       name: 'island',
     );
@@ -250,32 +333,23 @@ class _RaceSceneState extends State<RaceScene> {
         height: .3,
         radialSegments: 64,
       ),
-      0xFF88C86B,
+      0xFF4AD15C,
       0,
-      -.1,
+      -.55,
       0,
       name: 'grass',
     );
     grass.scale = island.scale;
-    _road(-_circuit.width / 2, _circuit.width / 2, 0, 0xFF53586D);
-    _road(
-      -_circuit.width / 2 - 5,
-      -_circuit.width / 2,
-      0,
-      0xFFFF7186,
-      striped: true,
-    );
-    _road(
-      _circuit.width / 2,
-      _circuit.width / 2 + 5,
-      0,
-      0xFFFF7186,
-      striped: true,
-    );
+    final half = _circuit.width / 2;
+    _road(-half, half, 0, 0xFF4E5668);
+    _road(-half, -half + 2.5, .35, 0xFF0C0E12);
+    _road(half - 2.5, half, .35, 0xFF0C0E12);
+    _road(-half - 5, -half, 0, 0xFFFF4D68, striped: true);
+    _road(half, half + 5, 0, 0xFFFF4D68, striped: true);
     final marks = s.InstancedMesh(
       geometry: s.PlaneGeometry(width: .08, depth: .55),
       material: _material(0xFFE8DFAA)..depthLayer = 4,
-      cullInstances: true,
+      cullInstances: false,
     );
     final markCount = (_circuit.length / 35).round();
     for (var i = 0; i < markCount; i++) {
@@ -294,6 +368,7 @@ class _RaceSceneState extends State<RaceScene> {
     }
     _scene!.add(
       s.Node(name: 'center-marks')
+        ..frustumCulled = false
         ..shadowStatic = true
         ..shadowCastingMode = s.ShadowCastingMode.off
         ..addComponent(s.InstancedMeshComponent(marks)),
@@ -301,7 +376,7 @@ class _RaceSceneState extends State<RaceScene> {
     final posts = s.InstancedMesh(
       geometry: s.CuboidGeometry(v.Vector3(.18, .7, .18)),
       material: _material(0xFFFFFFFF),
-      cullInstances: true,
+      cullInstances: false,
     );
     final postCount = (_circuit.length / 140).round();
     for (var i = 0; i < postCount; i++) {
@@ -323,6 +398,7 @@ class _RaceSceneState extends State<RaceScene> {
     }
     _scene!.add(
       s.Node(name: 'roadside-posts')
+        ..frustumCulled = false
         ..shadowStatic = true
         ..addComponent(s.InstancedMeshComponent(posts)),
     );
@@ -431,6 +507,7 @@ class _RaceSceneState extends State<RaceScene> {
     }
     for (var i = 0; i < 7; i++) {
       final cloud = s.Node(name: 'cloud-$i')
+        ..frustumCulled = false
         ..position = v.Vector3(
           -35 + i * 11,
           8 + (i % 3) * 2.0,
@@ -452,100 +529,204 @@ class _RaceSceneState extends State<RaceScene> {
     }
   }
 
-  late final s.Geometry _wheelGeometry = _makeWheelGeometry();
+  v.Vector4 _inkTint(Color color, [double amount = .92]) {
+    final mixed = Color.lerp(const Color(0xFF1A1A1A), color, amount)!;
+    double linear(double channel) => channel <= .04045
+        ? channel / 12.92
+        : math.pow((channel + .055) / 1.055, 2.4).toDouble();
+    return v.Vector4(linear(mixed.r), linear(mixed.g), linear(mixed.b), 1);
+  }
 
-  s.Geometry _makeWheelGeometry() {
-    final positions = <double>[], colors = <double>[];
-    void triangle(v.Vector3 a, v.Vector3 b, v.Vector3 c, double shade) {
-      for (final p in [a, b, c]) {
-        positions.addAll([p.x, p.y, p.z]);
-        colors.addAll([shade, shade, shade, 1]);
+  void _paintKart(s.Node node, Color tint) {
+    node.shadowCastingMode = s.ShadowCastingMode.off;
+    node.frustumCulled = false;
+    const body = {'Carenagem dianteira', 'Lateral E', 'Lateral D', 'Aerofolio'};
+    final mesh = node.mesh;
+    if (mesh != null &&
+        (body.contains(node.name) ||
+            node.name == 'Capacete' ||
+            node.name == 'Faixa central')) {
+      final color = node.name == 'Faixa central'
+          ? Color.lerp(tint, const Color(0xFFFFF4D2), .5)!
+          : tint;
+      final amount = node.name == 'Capacete' ? .98 : .9;
+      for (final primitive in mesh.primitives) {
+        primitive.material = s.PhysicallyBasedMaterial()
+          ..baseColorFactor = _inkTint(color, amount)
+          ..roughnessFactor = .45
+          ..metallicFactor = 0
+          ..alphaMode = s.AlphaMode.opaque;
       }
     }
-
-    for (var i = 0; i < 24; i++) {
-      final a = i * math.pi / 12, b = (i + 1) * math.pi / 12;
-      v.Vector3 point(double angle, double radius, double y) =>
-          v.Vector3(math.cos(angle) * radius, y, math.sin(angle) * radius);
-      final lowA = point(a, .28, -.125), lowB = point(b, .28, -.125);
-      final highA = point(a, .28, .125), highB = point(b, .28, .125);
-      const tread = .025;
-      triangle(lowA, highA, lowB, tread);
-      triangle(lowB, highA, highB, tread);
-      for (final side in [-1.0, 1.0]) {
-        final y = side * .125;
-        final innerA = point(a, .1, y), innerB = point(b, .1, y);
-        final outerA = point(a, .28, y), outerB = point(b, .28, y);
-        void cap(v.Vector3 p, v.Vector3 q, v.Vector3 r, double shade) {
-          if (side > 0) {
-            triangle(p, r, q, shade);
-          } else {
-            triangle(p, q, r, shade);
-          }
-        }
-
-        cap(v.Vector3(0, y, 0), innerA, innerB, .4);
-        final spoke = i % 6 == 0 ? .32 : .025;
-        cap(innerA, outerA, innerB, spoke);
-        cap(innerB, outerA, outerB, spoke);
-      }
+    if (node.name == 'Volante') node.position = v.Vector3(0, .56, .18);
+    if (node.name == 'Coluna do volante') {
+      node.position = v.Vector3(0, .42, .08);
     }
-    return s.MeshGeometry.fromArrays(
-      positions: Float32List.fromList(positions),
-      colors: Float32List.fromList(colors),
-      indices: List.generate(positions.length ~/ 3, (i) => i),
-    );
+    if (node.name == 'Viseira') node.position = v.Vector3(0, .02, .2);
+    if (node.name == 'Brilho da viseira') {
+      node.position = v.Vector3(.05, .06, .23);
+      node.scale = v.Vector3(.7, .7, .5);
+    }
+    for (final child in node.children) {
+      _paintKart(child, tint);
+    }
   }
 
   _Kart _kart(Car car) {
-    final root = s.Node(name: 'kart-${car.driver.slot}');
+    final root = s.Node(name: 'kart-${car.driver.slot}')..frustumCulled = false;
     _scene!.add(root);
-    final body = s.Node();
+    final tint = Color(car.driver.color);
+    final body = _kartTemplates.single.clone()..scale = v.Vector3.all(.98);
+    _paintKart(body, tint);
     root.add(body);
-    _box(0, .35, 0, 1.1, .35, 1.8, car.driver.color, parent: body);
-    _box(0, .28, .95, 1.25, .2, .25, 0xFF263342, parent: body);
-    _box(0, .6, -.32, .6, .55, .65, 0xFF263342, parent: body);
-    _box(0, .55, .58, .78, .2, .65, car.driver.color, parent: body);
-    _mesh(
-      s.SphereGeometry(radius: .29, segments: 12, rings: 8),
-      car.driver.color,
-      0,
-      1.05,
-      -.15,
-      parent: body,
-    );
-    _box(0, 1.08, .105, .43, .14, .13, 0xFF263342, parent: body);
-    final wheels = <s.Node>[];
-    for (final x in [-.64, .64]) {
-      for (final z in [-.6, .58]) {
-        final wheel = _mesh(
-          _wheelGeometry,
-          0xFFFFFFFF,
-          x,
-          .28,
-          z,
-          parent: root,
-        );
-        wheel.rotation = v.Quaternion.axisAngle(
-          v.Vector3(0, 0, 1),
-          math.pi / 2,
-        );
-        wheels.add(wheel);
+    final wheels = [
+      for (final name in [
+        'Roda Frente E',
+        'Roda Frente D',
+        'Roda Tras E',
+        'Roda Tras D',
+      ])
+        body.getChildByName(name)!,
+    ];
+    for (final (index, wheel) in wheels.indexed) {
+      for (final child in [...wheel.children]) {
+        child.visible = false;
       }
+      _dressWheel(wheel, rear: index >= 2);
     }
-    final flame = _mesh(
-      s.IcosphereGeometry(radius: .35, subdivisions: 1),
-      0xFFFFD061,
-      0,
-      .35,
-      -1.3,
-      parent: root,
+    final steer = body.getChildByName('Volante')!;
+    for (final side in [-.2, .2]) {
+      final pipe = _mesh(
+        s.CylinderGeometry(
+          topRadius: .04,
+          bottomRadius: .05,
+          height: .36,
+          radialSegments: 8,
+        ),
+        0xFF9AA6B5,
+        side,
+        .4,
+        -1.16,
+        parent: body,
+      );
+      pipe.rotation = v.Quaternion.axisAngle(v.Vector3(1, 0, 0), math.pi / 2);
+    }
+    final flames = <s.Node>[
+      for (final side in [-.2, .2]) _flame(body, side),
+    ];
+    final smoke = <s.Node>[
+      for (final side in [-.71, .71])
+        for (var i = 0; i < 3; i++) _smoke(body, side),
+    ];
+    return _Kart(root, body, wheels, steer, flames, smoke);
+  }
+
+  void _dressWheel(s.Node wheel, {required bool rear}) {
+    final radius = rear ? .33 : .27;
+    final width = rear ? .24 : .2;
+    s.Node band(double bandRadius, double bandWidth, int color) {
+      final node = _mesh(
+        s.CylinderGeometry(
+          topRadius: bandRadius,
+          bottomRadius: bandRadius,
+          height: bandWidth,
+          radialSegments: 24,
+        ),
+        color,
+        0,
+        0,
+        0,
+        parent: wheel,
+      );
+      node.rotation = v.Quaternion.axisAngle(v.Vector3(0, 0, 1), -math.pi / 2);
+      return node;
+    }
+
+    band(radius, width, 0xFF17191D);
+    band(radius * .86, width * .72, 0xFF2C3138);
+    band(radius * .62, width * .5, 0xFFD5DCE4);
+    band(radius * .18, width * .62, 0xFF8D97A3);
+    for (var i = 0; i < 5; i++) {
+      final arm = s.Node()
+        ..frustumCulled = false
+        ..rotation = v.Quaternion.axisAngle(
+          v.Vector3(1, 0, 0),
+          i * math.pi * 2 / 5,
+        );
+      wheel.add(arm);
+      _box(
+        0,
+        radius * .4,
+        0,
+        width * .22,
+        radius * .46,
+        radius * .07,
+        i == 0 ? 0xFFFFF6D8 : 0xFFB7C0C8,
+        parent: arm,
+      );
+    }
+    for (var i = 0; i < 12; i++) {
+      final angle = i * math.pi * 2 / 12;
+      final reach = radius - radius * .05;
+      final block = _box(
+        0,
+        math.cos(angle) * reach,
+        math.sin(angle) * reach,
+        width * .72,
+        radius * .1,
+        radius * .14,
+        i == 0 ? 0xFFF4F1E8 : 0xFF1A1E24,
+        parent: wheel,
+      );
+      block.rotation = v.Quaternion.axisAngle(v.Vector3(1, 0, 0), angle);
+    }
+  }
+
+  s.Node _flame(s.Node body, double side) {
+    final anchor = s.Node()
+      ..position = v.Vector3(side, .42, -1.34)
+      ..visible = false
+      ..frustumCulled = false;
+    body.add(anchor);
+    void tongue(double height, double nozzle, double tip, int color) {
+      final node = _mesh(
+        s.CylinderGeometry(
+          topRadius: tip,
+          bottomRadius: nozzle,
+          height: height,
+          radialSegments: 8,
+        ),
+        color,
+        0,
+        0,
+        -height / 2,
+        parent: anchor,
+      );
+      node.rotation = v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -math.pi / 2);
+    }
+
+    tongue(1.45, .09, .032, 0xFFFFD98A);
+    tongue(.95, .046, .016, 0xFFF4FBFF);
+    return anchor;
+  }
+
+  s.Node _smoke(s.Node body, double x) {
+    final geometry = _smokeGeometry ??= s.IcosphereGeometry(
+      radius: .22,
+      subdivisions: 1,
     );
-    flame.visible = false;
-    return _Kart(root, body, wheels, flame);
+    final node = s.Node(mesh: s.Mesh(geometry, _material(0xFFE6E1D8)))
+      ..position = v.Vector3(x, .2, -.8)
+      ..scale = v.Vector3.zero()
+      ..visible = false
+      ..frustumCulled = false
+      ..shadowCastingMode = s.ShadowCastingMode.off;
+    body.add(node);
+    return node;
   }
 
   void _tick(Duration elapsed, double dt) {
+    if (dt > 0) _presented = true;
     widget.onAdvance?.call(dt);
     final race = widget.race ?? _preview;
     final seconds = elapsed.inMicroseconds / 1000000;
@@ -557,33 +738,97 @@ class _RaceSceneState extends State<RaceScene> {
       final kart = _karts.putIfAbsent(car.driver.slot, () => _kart(car));
       final height = _circuit.surfaceHeight(car.x, car.y) / 20;
       final position = v.Vector3(car.x / 20, height, car.y / 20);
-      final motion = (car.speed.abs() / 270).clamp(0.0, 1.0);
+      final speed = car.speed.isFinite ? car.speed : 0.0;
+      final steer = car.steering.isFinite ? car.steering : 0.0;
+      final step = dt.isFinite ? dt.clamp(0.0, .05) : 0.0;
+      final blend = 1 - math.exp(-step * 6);
+      final driftBlend = 1 - math.exp(-step * 2.4);
+      final rate = step > 0 ? (speed - kart.lastSpeed) / step : 0.0;
+      final pitchTarget = !rate.isFinite
+          ? 0.0
+          : rate > 140
+          ? -.045
+          : rate < -220
+          ? .035
+          : 0.0;
+      if (!kart.pitch.isFinite) kart.pitch = 0;
+      if (!kart.drift.isFinite) kart.drift = 0;
+      if (!kart.puff.isFinite) kart.puff = 0;
+      kart.pitch += (pitchTarget - kart.pitch) * blend;
+      final driftTarget = speed.abs() > 70
+          ? ((steer.abs() - .2) / .7).clamp(0.0, 1.0)
+          : 0.0;
+      kart.drift = (kart.drift + (driftTarget - kart.drift) * driftBlend).clamp(
+        0.0,
+        1.0,
+      );
+      kart.puff = (kart.puff + (kart.drift - kart.puff) * driftBlend).clamp(
+        0.0,
+        1.0,
+      );
+      kart.lastSpeed = speed;
+      final motion = (speed.abs() / 405).clamp(0.0, 1.0);
+      final heading = car.heading.isFinite ? car.heading : 0.0;
       kart.root.position = position;
       kart.root.rotation = v.Quaternion.axisAngle(
         v.Vector3(0, 1, 0),
-        math.pi / 2 - car.heading,
+        math.pi / 2 - heading,
       );
-      kart.body.rotation = v.Quaternion.axisAngle(
-        v.Vector3(0, 0, 1),
-        -.1 * car.steering * (car.speed / 270),
-      );
+      final slide = kart.drift * -steer.sign * .16;
+      final attitude =
+          v.Quaternion.axisAngle(
+            v.Vector3(0, 1, 0),
+            kart.drift * steer.sign * .22,
+          ) *
+          v.Quaternion.axisAngle(
+            v.Vector3(0, 0, 1),
+            -.04 * steer * (speed / 405),
+          ) *
+          v.Quaternion.axisAngle(v.Vector3(1, 0, 0), kart.pitch);
+      kart.body.rotation = attitude;
+      const axle = .3;
+      final swung = attitude.rotated(v.Vector3(0, -axle, 0));
+      final bounce =
+          (.5 + .5 * math.sin(seconds * 18 + car.driver.slot)) * .008 * motion;
       kart.body.position = v.Vector3(
-        0,
-        math.sin(seconds * 18 + car.driver.slot) * .012 * motion,
-        0,
+        slide + swung.x,
+        .045 + axle + swung.y + bounce,
+        swung.z,
       );
-      kart.spin = (kart.spin + dt * car.speed / 22) % (math.pi * 2);
+      kart.spin =
+          (kart.spin + step * (speed / 20) / (.33 * .98)) % (math.pi * 2);
       for (final (index, wheel) in kart.wheels.indexed) {
+        final front = index < 2;
+        final steerAngle = front ? steer * .35 : 0.0;
         wheel.rotation =
-            v.Quaternion.axisAngle(
-              v.Vector3(0, 1, 0),
-              index.isOdd ? car.steering * .3 : 0,
-            ) *
-            v.Quaternion.axisAngle(v.Vector3(0, 0, 1), math.pi / 2) *
-            v.Quaternion.axisAngle(v.Vector3(0, 1, 0), kart.spin);
+            v.Quaternion.axisAngle(v.Vector3(0, 1, 0), steerAngle) *
+            v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -kart.spin);
       }
-      kart.flame.visible = car.boosting;
-      kart.flame.scale = v.Vector3(.8, .8, 2.2 + math.sin(seconds * 55) * .7);
+      final smoking = kart.puff >= .08;
+      for (final (index, puff) in kart.smoke.indexed) {
+        if (!smoking) {
+          puff.visible = false;
+          puff.scale = v.Vector3.zero();
+          continue;
+        }
+        final slot = index % 3;
+        final side = index < 3 ? -.71 : .71;
+        final life = (seconds * 1.35 + slot * .34) % 1.0;
+        final grow = math.sin(life * math.pi);
+        final size = grow * (.1 + .22 * life) * (.55 + kart.puff * .6);
+        puff.visible = grow > .08;
+        puff.scale = v.Vector3.all(size.isFinite ? size : 0);
+        puff.position = v.Vector3(side, .01 + life * .18, -.72 - life * .42);
+      }
+      for (final (index, flame) in kart.flames.indexed) {
+        flame.visible = car.boosting;
+        if (!car.boosting) continue;
+        final thrust = .78 + .22 * math.sin(seconds * 46 + index * 1.4);
+        flame.scale = v.Vector3(1, 1, thrust);
+      }
+      kart.steer.rotation =
+          v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -.7) *
+          v.Quaternion.axisAngle(v.Vector3(0, 0, 1), -steer * .8);
     }
     for (var i = 0; i < _clouds.length; i++) {
       _clouds[i].position = v.Vector3(
@@ -613,29 +858,41 @@ class _RaceSceneState extends State<RaceScene> {
         height + .7,
         car.y / 20 + math.sin(car.heading) * 3,
       );
-      final approach = widget.approach.clamp(0.0, 1.0);
+      final approachRaw = widget.approach;
+      final approach = approachRaw.isFinite ? approachRaw.clamp(0.0, 1.0) : 1.0;
       final eye = v.Vector3(
         car.x / 20 - math.cos(car.heading) * (6 + (1 - approach) * 16),
         height + 2.8 + (1 - approach) * 9,
         car.y / 20 - math.sin(car.heading) * (6 + (1 - approach) * 16),
       );
+      if (!_finite3(eye) || !_finite3(target)) continue;
       final camera = _playerCameras.putIfAbsent(
         car.driver.id,
         () => s.PerspectiveCamera(
           position: eye.clone(),
           target: target.clone(),
           fovRadiansY: 1.0,
+          fovNear: .2,
         ),
       );
-      final blend = 1 - math.exp(-dt.clamp(0.0, .05) * 5);
-      camera.position += (eye - camera.position) * blend;
-      camera.target += (target - camera.target) * blend;
-      camera.fovRadiansY +=
-          (1.0 +
-              .12 * (car.speed.abs() / 270).clamp(0, 1) +
-              (car.boosting ? .06 : 0) -
-              camera.fovRadiansY) *
-          blend;
+      final follow =
+          1 - math.exp(-(dt.isFinite ? dt.clamp(0.0, .05) : 0.0) * 5);
+      if (!camera.position.x.isFinite ||
+          !camera.target.x.isFinite ||
+          !camera.fovRadiansY.isFinite) {
+        camera.position.setFrom(eye);
+        camera.target.setFrom(target);
+        camera.fovRadiansY = 1;
+      } else {
+        camera.position += (eye - camera.position) * follow;
+        camera.target += (target - camera.target) * follow;
+        camera.fovRadiansY +=
+            (1.0 +
+                .12 * (car.speed.abs() / 405).clamp(0, 1) +
+                (car.boosting ? .06 : 0) -
+                camera.fovRadiansY) *
+            follow;
+      }
     }
     _hudElapsed += dt;
     if (_hudElapsed >= 1 / 30 || dt == 0) {
@@ -745,40 +1002,52 @@ class _RaceSceneState extends State<RaceScene> {
         child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!)),
       );
     }
-    if (_scene == null) {
-      return const Center(child: CircularProgressIndicator(color: lime));
-    }
+    if (_scene == null) return const _LoadingTrack();
     return ClipRRect(
       borderRadius: BorderRadius.circular(widget.race == null ? 24 : 0),
-      child: Stack(
-        children: [
-          const Positioned.fill(child: ColoredBox(color: Color(0xFF97D9E6))),
-          Positioned.fill(
-            child: s.SceneView(
-              _scene!,
-              viewsBuilder: _views,
-              onTick: _tick,
-              maxFrameRate: widget.race == null ? 30 : 60,
-              warmUp: true,
-              pixelRatio: Platform.isAndroid ? .8 : 1,
+      child: LayoutBuilder(
+        builder: (context, constraints) => Stack(
+          children: [
+            const Positioned.fill(child: ColoredBox(color: Color(0xFF97D9E6))),
+            Positioned.fill(
+              child: s.SceneView(
+                _scene!,
+                viewsBuilder: _views,
+                onTick: _tick,
+                maxFrameRate: widget.race == null ? 30 : 60,
+                warmUp: true,
+                pixelRatio: _pixelRatio(context, constraints.biggest),
+                loadingBuilder: (context, _) => const _LoadingTrack(),
+              ),
             ),
-          ),
-          Positioned.fill(
-            child: IgnorePointer(
-              child: RepaintBoundary(child: CustomPaint(painter: _hud)),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: RepaintBoundary(child: CustomPaint(painter: _hud)),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
+
+  double _pixelRatio(BuildContext context, Size size) {
+    if (!Platform.isAndroid) return 1;
+    final longSide = math.max(size.width, size.height);
+    if (longSide <= 0 || !longSide.isFinite) return 1;
+    final native = View.of(context).devicePixelRatio;
+    return math.min(native, 1280 / longSide);
+  }
 }
 
+bool _finite3(v.Vector3 value) =>
+    value.x.isFinite && value.y.isFinite && value.z.isFinite;
+
 class _Kart {
-  _Kart(this.root, this.body, this.wheels, this.flame);
-  final s.Node root, body, flame;
-  final List<s.Node> wheels;
-  double spin = 0;
+  _Kart(this.root, this.body, this.wheels, this.steer, this.flames, this.smoke);
+  final s.Node root, body, steer;
+  final List<s.Node> wheels, flames, smoke;
+  double spin = 0, pitch = 0, drift = 0, puff = 0, lastSpeed = 0;
 }
 
 List<Rect> playerViewports(int count) {
@@ -800,12 +1069,129 @@ List<Rect> playerViewports(int count) {
   ];
 }
 
+String? _standingGap(Race race, Car car, List<Car> standings) {
+  final place = standings.indexOf(car);
+  if (place <= 0) return null;
+  String gapTo(Car ahead) {
+    final laps = (ahead.progress - car.progress) / (math.pi * 2);
+    final seconds = laps * race.circuit.length / math.max(car.speed.abs(), 50);
+    if (!seconds.isFinite || seconds <= 0) return '+0.00';
+    return '+${seconds.toStringAsFixed(seconds >= 10 ? 1 : 2)}';
+  }
+
+  final ahead = standings[place - 1];
+  final leader = gapTo(standings.first);
+  if (place == 1) return leader;
+  return 'L $leader  ${gapTo(ahead)}';
+}
+
+void _minimap(Canvas canvas, Size size, Race race) {
+  final order = race.standings;
+  final count = order.length;
+  final fit = count <= 1
+      ? 1.0
+      : count == 2
+      ? .72
+      : count <= 4
+      ? .58
+      : .46;
+  final mapWidth = 150.0 * fit, mapHeight = 96.0 * fit;
+  final card = Size(
+    mapWidth + 100 * fit,
+    math.max(mapHeight, count * 14.0 * fit) + 16,
+  );
+  const margin = 16.0;
+  final origin = Offset(
+    size.width - card.width - margin,
+    count <= 1 ? size.height - card.height - margin : margin,
+  );
+  canvas.drawRRect(
+    RRect.fromRectAndRadius(
+      (origin & card).shift(const Offset(0, 4)),
+      const Radius.circular(12),
+    ),
+    Paint()..color = const Color(0x66000000),
+  );
+  final bounds = origin & card;
+  canvas.drawRRect(
+    RRect.fromRectAndRadius(bounds, const Radius.circular(10)),
+    Paint()..color = const Color(0xF0111918),
+  );
+  final map = Rect.fromLTWH(origin.dx + 8, origin.dy + 8, mapWidth, mapHeight);
+  final circuit = race.circuit;
+  final spanX = math.max(1.0, circuit.maxX - circuit.minX);
+  final spanY = math.max(1.0, circuit.maxY - circuit.minY);
+  final scale = math.min((map.width - 12) / spanX, (map.height - 12) / spanY);
+  final center = Offset(
+    (circuit.minX + circuit.maxX) / 2,
+    (circuit.minY + circuit.maxY) / 2,
+  );
+  Offset point(double x, double y) =>
+      map.center + Offset((x - center.dx) * scale, (center.dy - y) * scale);
+  final path = Path();
+  for (var i = 0; i < circuit.points.length; i++) {
+    final spot = point(circuit.points[i].x, circuit.points[i].y);
+    if (i == 0) {
+      path.moveTo(spot.dx, spot.dy);
+    } else {
+      path.lineTo(spot.dx, spot.dy);
+    }
+  }
+  canvas.drawPath(
+    path..close(),
+    Paint()
+      ..color = Colors.white.withValues(alpha: .85)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeJoin = StrokeJoin.round,
+  );
+  final label = TextPainter(textDirection: TextDirection.ltr);
+  for (var i = 0; i < order.length; i++) {
+    final car = order[i];
+    final color = Color(car.driver.color);
+    final spot = point(car.x, car.y);
+    canvas.drawCircle(spot, 5, Paint()..color = color);
+    label.text = TextSpan(
+      text: '${i + 1}',
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 9,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+    label.layout();
+    label.paint(canvas, spot + const Offset(6, -6));
+    label.text = TextSpan(
+      text: '${i + 1} ${car.driver.name}',
+      style: TextStyle(
+        color: color,
+        fontSize: 11 * fit,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+    label.layout(maxWidth: 92 * fit);
+    label.paint(canvas, Offset(map.right + 8, origin.dy + 8 + i * 14 * fit));
+  }
+  label.dispose();
+}
+
+class _HudPanel {
+  double width = 168;
+  double height = 72;
+}
+
 class _PlayerHud extends CustomPainter {
-  _PlayerHud(this.race, ChangeNotifier repaint, {required this.tvMode})
-    : super(repaint: repaint);
+  _PlayerHud(
+    this.race,
+    ChangeNotifier repaint, {
+    required this.tvMode,
+    required this.presented,
+  }) : super(repaint: repaint);
   final Race? Function() race;
   final bool Function() tvMode;
+  final bool Function() presented;
   final _textPainters = <TextPainter>[];
+  final _panels = <int, _HudPanel>{};
   int _textIndex = 0;
   void disposeText() {
     for (final painter in _textPainters) {
@@ -845,7 +1231,7 @@ class _PlayerHud extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     _textIndex = 0;
     final current = race();
-    if (current == null) return;
+    if (current == null || !presented()) return;
     final rectangles = playerViewports(current.cars.length);
     final standings = current.standings;
     for (var i = 0; i < current.cars.length; i++) {
@@ -858,130 +1244,263 @@ class _PlayerHud extends CustomPainter {
       );
       canvas.save();
       canvas.clipRect(rect);
-      canvas.drawRect(
-        rect.deflate(1.5),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..color = ink,
-      );
-      final scale = (rect.width / 400).clamp(tvMode() ? 1.15 : .9, 1.8);
-      final insetX = rect.width * .05, insetY = rect.height * .05;
+      final scale = (math.min(rect.width, rect.height) / (tvMode() ? 360 : 320))
+          .clamp(.55, 1.0);
+      final insetX = math.max(18.0, rect.width * .035);
+      final insetY = math.max(16.0, rect.height * .04);
+      canvas.save();
       canvas.translate(rect.left + insetX, rect.top + insetY);
       canvas.scale(scale);
-      final hud = Rect.fromLTWH(
-        0,
-        0,
-        (rect.width - insetX * 2) / scale,
-        (rect.height - insetY * 2) / scale,
+      final color = Color.lerp(Color(car.driver.color), Colors.white, .2)!;
+      final place = standings.indexOf(car) + 1;
+      final title = car.retired
+          ? 'SAIU'
+          : car.finishedAt != null
+          ? 'CHEGOU'
+          : car.driver.name;
+      final placeText = car.retired ? '—' : '$placeº';
+      final timeText = car.finishedAt == null
+          ? formatRaceTime(car.lapTime(current.elapsed))
+          : formatRaceTime(car.finishedAt!);
+      final lapText =
+          '${math.min(car.laps + 1, current.totalLaps)}/${current.totalLaps}';
+      final gap = _standingGap(current, car, standings);
+      final best = car.bestLap == null
+          ? null
+          : 'melhor ${formatRaceTime(car.bestLap!)}';
+      final racing = car.finishedAt == null && !car.retired;
+      final measure = TextPainter(textDirection: TextDirection.ltr);
+      double widthOf(String value, double fontSize) {
+        measure.text = TextSpan(
+          text: value,
+          style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w800),
+        );
+        measure.layout();
+        return measure.width;
+      }
+
+      final trackName = current.circuit.name;
+      final placeWidth = widthOf(placeText, 28);
+      final nameWidth = widthOf(title, 15);
+      final trackWidth = widthOf(trackName, 13);
+      final timeWidth = widthOf(timeText, 14);
+      final lapWidth = widthOf(lapText, 14);
+      final gapWidth = gap == null ? 0.0 : widthOf(gap, 13);
+      final bestWidth = best == null ? 0.0 : widthOf(best, 13);
+      measure.dispose();
+      final contentWidth = [
+        placeWidth + 10 + nameWidth,
+        trackWidth,
+        timeWidth + 28 + lapWidth,
+        gapWidth,
+        bestWidth,
+        148.0,
+      ].reduce(math.max);
+      var contentHeight = 36.0 + 8 + 16 + 20;
+      if (gap != null) contentHeight += 8 + 14;
+      if (best != null) contentHeight += 8 + 14;
+      if (racing) contentHeight += 12 + 10;
+      final panel = _panels.putIfAbsent(car.driver.slot, _HudPanel.new);
+      panel.width = contentWidth + 28;
+      panel.height = contentHeight + 20;
+      final card = RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, panel.width, panel.height),
+        const Radius.circular(14),
       );
+      canvas.drawRRect(
+        card.shift(const Offset(0, 4)),
+        Paint()..color = const Color(0x73000000),
+      );
+      canvas.drawRRect(card, Paint()..color = ink);
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromLTWH(0, 0, 138, 66),
-          const Radius.circular(10),
-        ),
-        Paint()..color = ink.withValues(alpha: .78),
-      );
-      final color = Color(car.driver.color);
-      _text(
-        canvas,
-        car.driver.name,
-        hud.topLeft + const Offset(10, 8),
-        15,
-        color,
-      );
-      _text(
-        canvas,
-        '${standings.indexOf(car) + 1}º',
-        hud.topLeft + const Offset(10, 30),
-        25,
-        Colors.white,
-      );
-      _text(
-        canvas,
-        '${math.min(car.laps + 1, current.totalLaps)}/${current.totalLaps}',
-        Offset(hud.right - 46, hud.top + 10),
-        16,
-        Colors.white,
-      );
-      _text(
-        canvas,
-        car.retired
-            ? 'SAIU'
-            : car.finishedAt != null
-            ? 'CHEGOU'
-            : '${car.speed.abs().round()}',
-        Offset(hud.left + 10, hud.bottom - 32),
-        20,
-        Colors.white,
-      );
-      _text(
-        canvas,
-        'CORRIDA ${formatRaceTime(car.raceTime(current.elapsed))}',
-        Offset(hud.right - 150, hud.top + 34),
-        13,
-        Colors.white,
-      );
-      _text(
-        canvas,
-        'VOLTA ${formatRaceTime(car.lapTime(current.elapsed))}',
-        Offset(hud.right - 150, hud.top + 53),
-        13,
-        Colors.white,
-      );
-      if (car.finishedAt == null && !car.retired && car.speed.abs() > 30) {
-        final track = current.circuit.heading(car.trackAngle);
-        final delta = math.atan2(
-          math.sin(car.heading - track),
-          math.cos(car.heading - track),
-        );
-        if (delta.abs() > math.pi / 2) {
-          _text(
-            canvas,
-            'CONTRA MÃO',
-            Offset(hud.left + 10, hud.bottom - 54),
-            16,
-            const Color(0xFFFF7186),
-          );
-        }
-      }
-      if (car.finishedAt != null) {
-        _text(
-          canvas,
-          '${standings.indexOf(car) + 1}º · CHEGOU!',
-          Offset(hud.width / 2 - 85, hud.height * .32),
-          22,
-          color,
-        );
-        _text(
-          canvas,
-          formatRaceTime(car.finishedAt!),
-          Offset(hud.width / 2 - 52, hud.height * .32 + 30),
-          20,
-          Colors.white,
-        );
-      }
-      final bar = Rect.fromLTWH(hud.right - 94, hud.bottom - 22, 80, 6);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(bar, const Radius.circular(3)),
-        Paint()..color = ink,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-            bar.left,
-            bar.top,
-            bar.width * car.boostCharge,
-            bar.height,
-          ),
+          Rect.fromLTWH(0, 0, 5, panel.height),
           const Radius.circular(3),
         ),
-        Paint()..color = car.boosting ? const Color(0xFFFFD061) : color,
+        Paint()..color = color,
       );
+      _text(canvas, placeText, const Offset(16, 8), 32, color);
+      _text(canvas, title, Offset(22 + placeWidth, 20), 16, Colors.white);
+      var line = 46.0;
+      _text(canvas, trackName, Offset(16, line), 13, lime);
+      line += 20;
+      _text(canvas, timeText, Offset(16, line), 15, Colors.white);
+      _text(
+        canvas,
+        lapText,
+        Offset(panel.width - lapWidth - 16, line),
+        15,
+        lime,
+      );
+      line += 24;
+      if (gap != null) {
+        _text(canvas, gap, Offset(16, line), 13, Colors.white);
+        line += 22;
+      }
+      if (best != null) {
+        _text(canvas, best, Offset(16, line), 13, lime);
+        line += 22;
+      }
+      if (racing) {
+        final bar = Rect.fromLTWH(16, line, panel.width - 32, 10);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(bar, const Radius.circular(5)),
+          Paint()..color = const Color(0x33FFFFFF),
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(
+              bar.left,
+              bar.top,
+              bar.width * car.boostCharge,
+              bar.height,
+            ),
+            const Radius.circular(5),
+          ),
+          Paint()..color = car.boosting ? const Color(0xFFFFD061) : color,
+        );
+      }
+      canvas.restore();
+      final wrongWay =
+          racing &&
+          car.speed.abs() > 30 &&
+          () {
+            final track = current.circuit.heading(car.trackAngle);
+            final delta = math.atan2(
+              math.sin(car.heading - track),
+              math.cos(car.heading - track),
+            );
+            return delta.abs() > math.pi / 2;
+          }();
+      if (wrongWay) {
+        const warning = 'CONTRA MÃO';
+        final warningSize = (rect.height * .075).clamp(22.0, 42.0);
+        final warningPainter = TextPainter(
+          text: TextSpan(
+            text: warning,
+            style: TextStyle(
+              fontSize: warningSize,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              letterSpacing: 1.2,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final plate = Rect.fromCenter(
+          center: rect.center,
+          width: warningPainter.width + 36,
+          height: warningPainter.height + 18,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            plate.shift(const Offset(0, 3)),
+            const Radius.circular(8),
+          ),
+          Paint()..color = const Color(0x66000000),
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(plate, const Radius.circular(8)),
+          Paint()..color = const Color(0xFFE23B4A),
+        );
+        warningPainter.paint(
+          canvas,
+          plate.center -
+              Offset(warningPainter.width / 2, warningPainter.height / 2),
+        );
+        warningPainter.dispose();
+      }
       canvas.restore();
     }
+    _minimap(canvas, size, current);
   }
 
   @override
   bool shouldRepaint(_PlayerHud oldDelegate) => true;
+}
+
+class _LoadingTrack extends StatefulWidget {
+  const _LoadingTrack();
+
+  @override
+  State<_LoadingTrack> createState() => _LoadingTrackState();
+}
+
+class _LoadingTrackState extends State<_LoadingTrack>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _motion = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _motion.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: ink,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const VoltaMark(height: 48),
+            const SizedBox(height: 28),
+            const Text(
+              'Carregando a pista',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: 220,
+              height: 8,
+              child: AnimatedBuilder(
+                animation: _motion,
+                builder: (context, _) {
+                  final travel = _motion.value;
+                  return CustomPaint(painter: _LoadBar(travel));
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LoadBar extends CustomPainter {
+  _LoadBar(this.travel);
+  final double travel;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final track = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(4),
+    );
+    canvas.drawRRect(track, Paint()..color = const Color(0xFF2A332C));
+    final width = size.width * .38;
+    final left = (size.width + width) * travel - width;
+    canvas.save();
+    canvas.clipRRect(track);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left, 0, width, size.height),
+        const Radius.circular(4),
+      ),
+      Paint()..color = lime,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_LoadBar oldDelegate) => oldDelegate.travel != travel;
 }

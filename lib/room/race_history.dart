@@ -57,6 +57,7 @@ class RaceHistory {
       'turbo': race.turbo,
       'mirrored': race.mirrored,
       'reversed': race.reversed,
+      'timeTrial': race.timeTrial,
       'results': [
         for (var i = 0; i < results.length; i++)
           {
@@ -78,5 +79,22 @@ class RaceHistory {
     });
     _pending = write.catchError((Object _) {});
     return write;
+  }
+
+  ({String name, double time})? bestOn(String circuit) {
+    String? name;
+    double? time;
+    for (final race in races) {
+      if (race['timeTrial'] != true || race['circuit'] != circuit) continue;
+      for (final result in race['results'] as List) {
+        final lap = result['bestLap'];
+        if (lap is! num) continue;
+        if (time != null && lap >= time) continue;
+        time = lap.toDouble();
+        name = result['name'] as String;
+      }
+    }
+    if (name == null || time == null) return null;
+    return (name: name, time: time);
   }
 }
