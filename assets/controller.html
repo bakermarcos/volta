@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><meta name="theme-color" content="#111918">
+<title>volta · controle</title>
+<style>
+:root{color-scheme:dark;--accent:#bdfe55;font-family:system-ui,sans-serif;background:#111918;color:#f1f4ee}*{box-sizing:border-box}body{margin:0;padding:max(16px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));min-height:100dvh;display:flex;flex-direction:column;gap:16px;overscroll-behavior:none}header{display:flex;align-items:center;gap:16px}h1{font-size:28px;letter-spacing:-1.5px;margin:0}h2{font-size:36px;letter-spacing:-1.5px;margin:0 0 12px}p{color:#a2b2a7;line-height:1.5}button,input,select{font:inherit;border:0;border-radius:16px;padding:14px}button{cursor:pointer;background:var(--accent);color:#111918;font-weight:700;min-height:44px}button:disabled{opacity:.35}.quiet{background:transparent;color:#a2b2a7;margin-left:auto;font-size:12px}input:not([type=range]){background:#23302a;color:#f1f4ee;width:100%;margin:16px 0;outline-color:var(--accent)}main{flex:1;display:flex;flex-direction:column;justify-content:center;width:100%;max-width:1000px;margin:auto}form{max-width:360px;width:100%;margin:auto}form button{width:100%}#pad{display:none;flex:1;flex-direction:column;gap:16px;justify-content:space-evenly}#hud{display:flex;justify-content:space-around;gap:12px;text-align:center;padding:12px;border-radius:20px;background:#1b2623}#hud strong{display:block;font-size:28px;font-variant-numeric:tabular-nums}#hud span{font-size:10px;color:#a2b2a7;letter-spacing:1.5px}#message{text-align:center;font-size:13px;min-height:18px;color:#a2b2a7}.controls{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center;min-height:250px}.touch{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}#steering{width:100%;max-width:280px;height:230px;justify-self:start;border-radius:40px;background:#1b2623;border:2px solid #34443a;position:relative;display:grid;place-items:center;overflow:hidden}#steering:before{content:'←　　→';position:absolute;inset:0;display:grid;place-items:center;font-size:28px;color:#66816b}#knob{width:74px;height:74px;border-radius:50%;background:#34483c;border:2px solid #66816b;z-index:1;box-shadow:0 6px 24px #0003;display:grid;place-items:center;font-size:10px;letter-spacing:1px;pointer-events:none}#steering.active{border-color:var(--accent)}#steering.active #knob{border-color:var(--accent);color:var(--accent)}.zone-label{position:absolute;bottom:18px;left:0;right:0;text-align:center;font-size:10px;letter-spacing:1.5px;color:#a2b2a7;pointer-events:none}#power{width:100%;max-width:280px;height:250px;justify-self:end;position:relative;padding:0;border:2px solid #526940;border-radius:40px;background:#243520;color:#f1f4ee;display:grid;grid-template-rows:1fr 1.2fr 1fr;align-items:center;text-align:center}#power span{pointer-events:none;font-size:11px;letter-spacing:1px}#power strong{font-size:19px;letter-spacing:0;display:block;margin:6px}#power .up{color:#cbb2ff}#power .down-label{color:#b3c2b4}#power.down{border-color:var(--accent);background:#3b5627;box-shadow:0 0 28px #bdfe5520}#power[data-mode=boost]{border-color:#d4b6ff;background:#54367a;box-shadow:0 0 30px #c7a7ff44}#power[data-mode=reverse]{border-color:#ffba88;background:#594330}meter{width:65%;height:6px;accent-color:#c7a7ff}meter::-webkit-meter-bar{background:#1b2623;border:0;border-radius:3px}meter::-webkit-meter-optimum-value{background:#c7a7ff}#energy{font-size:10px;color:#dbc9f4}#status{font-size:11px;color:#a2b2a7}#error,#sensorStatus{color:#ffb19d;font-size:12px}#sensorStatus:empty{display:none}.hint{text-align:center;font-size:11px;color:#a2b2a7;line-height:1.5}.offline .controls{opacity:.35;pointer-events:none}details{font-size:13px}summary{cursor:pointer;padding:12px 0;color:#bdfe55;min-height:44px}#settings>div{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 0}#settings button{background:#283a30;color:#f1f4ee}#settings input{accent-color:var(--accent);width:120px}#history{margin:16px auto;width:100%;max-width:600px}#historyData article{border-top:1px solid #34443a;padding:16px 0}#historyData p{margin:6px 0}body:has(#pad:not(.offline)) #history{display:none}@media(orientation:landscape) and (max-height:560px){body{gap:4px;padding-top:max(6px,env(safe-area-inset-top));padding-bottom:max(6px,env(safe-area-inset-bottom))}header h1{font-size:22px}header button{min-height:36px;padding:8px}#pad{gap:4px}#hud{padding:4px;max-width:340px;width:100%;align-self:center}#hud strong{font-size:20px}#message{font-size:11px;min-height:14px}.controls{min-height:170px;gap:80px;flex:1}#steering{height:180px;max-width:260px}#power{height:190px;max-width:260px}#power strong{font-size:17px;margin:2px}.zone-label{bottom:10px}.hint{display:none}#settings summary{padding:5px 0;min-height:28px}}@media(max-width:380px){body{padding:12px}.controls{gap:14px}#steering{height:215px}#power{height:235px}#knob{width:64px;height:64px}}
+#status{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}header{gap:8px}.quiet{margin-left:0}#lobby{text-align:center;max-width:380px;margin:auto}#lobby h2{font-size:28px}#ready{width:100%;min-height:64px}#ready[aria-pressed=true]{background:#283a30;color:#bdfe55;border:2px solid #bdfe55}#countdown{text-align:center;font-size:100px;font-weight:900;color:#bdfe55}#timers{display:flex;justify-content:center;gap:32px;font-size:10px;color:#a2b2a7}#timers strong{font-size:16px;color:#f1f4ee;font-variant-numeric:tabular-nums;padding-left:6px}html,body{touch-action:manipulation}#pad[data-phase=lobby] .controls,#pad[data-phase=lobby] #hud,#pad[data-phase=lobby] #timers,#pad[data-phase=lobby] .hint,#pad[data-phase=countdown] #hud,#pad[data-phase=countdown] .hint{display:none}
+</style>
+<header><h1>volta</h1><span id="status">Wi-Fi local</span><button id="pause" class="quiet" aria-label="Pausar" hidden>Pausar</button><button id="leave" class="quiet" hidden>Sair</button></header>
+<main>
+<form id="join"><h2>Pronto para<br>a próxima curva?</h2><p>Use o mesmo Wi-Fi do jogo.<br>A pista está na TV ou no aparelho do jogo.</p><label for="name">Seu nome</label><input id="name" maxlength="16" autocomplete="nickname" required placeholder="Nome do piloto"><button>Entrar na corrida →</button><p id="error" role="alert"></p></form>
+<section id="pad" class="offline">
+<div id="hud"><div><strong id="rank">—</strong><span>POSIÇÃO</span></div><div><strong id="lap">1/2</strong><span>VOLTA</span></div><div><strong id="speed">0</strong><span>VELOCIDADE</span></div></div>
+<div id="timers"><span>CORRIDA <strong id="raceTime">0:00.00</strong></span><span>VOLTA <strong id="lapTime">0:00.00</strong></span></div>
+<div id="lobby" hidden><h2>Seu lugar está reservado.</h2><p>Confirme quando estiver pronto para correr.</p><button id="ready" type="button">Estou pronto</button><p id="raceSetup"></p><p id="lastResult" hidden></p><p id="readyCount">0 pilotos prontos</p></div>
+<div id="countdown" hidden aria-live="assertive">3</div>
+<div id="message" aria-live="polite">Aguarde a largada no aparelho do jogo.</div>
+<div class="controls">
+<div id="steering" class="touch" role="slider" tabindex="0" aria-label="Direção" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0"><div id="knob">VIRAR</div><span class="zone-label">ARRASTE PARA VIRAR</span></div>
+<button id="power" class="touch" aria-label="Acelerar. Deslize para cima para turbo, para baixo para freio e ré." disabled><span class="up">↑ TURBO<br><meter id="charge" min="0" max="1" value="1" aria-label="Carga do turbo"></meter> <small id="energy">100%</small></span><span><strong id="powerLabel">SEGURE PARA ACELERAR</strong><span id="powerHint">Deslize sem levantar o dedo</span></span><span class="down-label">↓ FREIO / RÉ</span></button>
+</div>
+<div class="hint">Dois polegares · direção à esquerda · aceleração e turbo à direita<br><span id="latency"></span></div>
+<details id="settings"><summary>Ajustes do controle</summary><div><label for="sensitivity">Sensibilidade</label><input id="sensitivity" type="range" min="0.5" max="1.2" value="0.75" step="0.05"><output id="sensitivityValue">75%</output><button id="tilt" type="button" aria-pressed="false">Usar inclinação</button><button id="calibrate" type="button" hidden>Centralizar</button></div><p id="sensorStatus" role="status"></p><p><a style="color:var(--accent)" href="__IPHONE_GUIDE__">Configurar inclinação no iPhone · HTTPS local</a></p></details>
+</section>
+<p style="text-align:center;font-size:13px"><a style="color:var(--accent)" href="__IPHONE_GUIDE__">Preparar inclinação no iPhone antes de entrar</a></p>
+<details id="history"><summary>Histórico de corridas</summary><p>Salvo no aparelho do jogo · pilotos agrupados pelo nome</p><div id="historyData">Carregando…</div></details>
+</main>
+<script>
+async function loadHistory(){
+ const container=document.getElementById('historyData');
+ try {
+  const response=await fetch(location.pathname.replace(/\/$/,'')+'/history');
+  if(!response.ok)throw Error();
+  const data=await response.json();container.replaceChildren();
+  const line=(parent,text,tag='p')=>{const el=document.createElement(tag);el.textContent=text;parent.append(el);return el;};
+  if(!data.races.length)line(container,'As corridas concluídas aparecerão aqui.');
+  for(const p of data.leaders)line(container,p.name+' · '+p.wins+' vitórias · '+p.races+' corridas');
+  for(const race of data.races){const article=document.createElement('article');container.append(article);line(article,race.circuit+' · '+new Date(race.date).toLocaleString('pt-BR'),'strong');for(const p of race.results)line(article,p.rank+'. '+p.name+' · '+(p.time===null?'SAIU':formatTime(p.time)));if(race.results.some(p=>p.laps?.length))for(const p of race.results)if(p.laps?.length)line(article,p.name+' · voltas '+p.laps.map(formatTime).join(' / '));}
+ }catch(_){container.textContent='Não foi possível consultar o histórico. Confira a conexão com o jogo.';}
+}
+document.getElementById('history').ontoggle=()=>{if(document.getElementById('history').open)loadHistory();};
+
+const $=id=>document.getElementById(id),storageKey='volta'+location.pathname;
+let phase='lobby',ready=false,pauseArmed=false,pauseTimer;
+let socket,token=sessionStorage.getItem(storageKey),name=localStorage.getItem('voltaName')||'',racing=false,leaving=false,retry,throttle,lastSent=0,steer=0,steeringPointer=null,powerPointer=null,steeringStart=0,powerStart=0,powerMode=null,tiltMode=false,tiltZero=null,tiltValue=0,sensorTimer;
+const savedSensitivity=Number(localStorage.getItem('voltaSensitivity'));if(savedSensitivity>=.5&&savedSensitivity<=1.2)$('sensitivity').value=savedSensitivity;
+$('name').value=name;
+function formatTime(seconds){const n=Math.floor(Math.max(0,seconds)*100);return Math.floor(n/6000)+':'+String(Math.floor(n/100)%60).padStart(2,'0')+'.'+String(n%100).padStart(2,'0');}
+function clearPauseRequest(){pauseArmed=false;clearTimeout(pauseTimer);$('pause').textContent='Pausar';$('pause').setAttribute('aria-label','Pausar');}
+const armed=()=>racing||phase==='countdown';
+function input(){if(socket?.readyState!==1)return;const now=performance.now();if(now-lastSent<40){clearTimeout(throttle);throttle=setTimeout(input,42);return;}lastSent=now;const live=armed();socket.send(JSON.stringify({type:'input',accelerate:live&&(powerMode==='go'||powerMode==='boost'),reverse:live&&powerMode==='reverse',boost:live&&powerMode==='boost',steer:live?steer:0}));}
+function direction(value){const magnitude=Math.min(1,Math.abs(value));const shaped=magnitude<=.08?0:Math.sign(value)*Math.pow((magnitude-.08)/.92,1.6);steer=Math.round(Math.max(-1,Math.min(1,shaped*Number($('sensitivity').value)))*100)/100;$('knob').style.transform='translateX('+(steer*55)+'px)';$('steering').setAttribute('aria-valuenow',Math.round(steer*100));input();}
+function power(mode){powerMode=mode;$('power').dataset.mode=mode||'';$('power').classList.toggle('down',mode!==null);$('powerLabel').textContent=mode==='boost'?'TURBO + ACELERAR':mode==='reverse'?'FREIO / RÉ':mode==='go'?'ACELERANDO':'SEGURE PARA ACELERAR';input();}
+function release(){steeringPointer=null;powerPointer=null;tiltZero=null;tiltValue=0;steer=0;$('knob').style.transform='';$('steering').classList.remove('active');$('steering').setAttribute('aria-valuenow','0');power(null);}
+function connect(){
+ leaving=false;clearTimeout(retry);$('status').textContent='Conectando…';$('error').textContent='';
+ socket=new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/room'+location.pathname);
+ socket.onopen=()=>socket.send(JSON.stringify({type:'join',name,token}));
+ socket.onmessage=event=>{const data=JSON.parse(event.data);
+  if(data.type==='error'){leaving=true;$('error').textContent=data.message;$('join').style.display='block';$('pad').style.display='none';$('leave').hidden=true;return;}
+  if(data.type==='welcome'){token=data.token;sessionStorage.setItem(storageKey,token);document.documentElement.style.setProperty('--accent','#'+(data.color>>>0).toString(16).slice(-6));$('join').style.display='none';$('pad').style.display='flex';$('leave').hidden=false;$('status').textContent=name+' · conectado';return;}
+  if(data.type==='pauseRequest'){pauseArmed=true;$('pause').textContent='Confirmar pausa';$('pause').setAttribute('aria-label','Confirmar pausa');clearTimeout(pauseTimer);pauseTimer=setTimeout(clearPauseRequest,4000);return;}
+  if(data.type==='pong'){$('latency').textContent='Conexão local · '+Math.round(performance.now()-data.sentAt)+' ms';return;}
+  if(data.type==='telemetry'){$('speed').textContent=Math.abs(data.speed);$('lap').textContent=Math.min(data.totalLaps??2,data.lap+1)+'/'+(data.totalLaps??2);$('rank').textContent=data.rank+'º';$('raceTime').textContent=formatTime(data.raceTime??0);$('lapTime').textContent=formatTime(data.lapTime??0);$('charge').value=data.charge;$('energy').textContent=Math.round(data.charge*100)+'%';if(racing)$('message').textContent=data.finishingIn!=null?'Último piloto · '+Math.ceil(data.finishingIn)+' s para terminar':data.wrongWay?'Contra mão. Vire e siga a pista.':'Olhe para a pista. Os dois polegares cuidam do resto.';return;}
+  if(data.type==='state'){
+   if(data.status==='finished')loadHistory();
+   phase=data.status;$('pad').dataset.phase=phase;
+   $('raceSetup').textContent=(data.circuit??'')+' · '+(data.totalLaps??2)+' volta(s)'+(data.turbo?' · TURBO':'')+(data.reversed?' · INVERSO':'')+(data.mirrored?' · ESPELHADO':'');
+   $('lastResult').hidden=!data.lastResult;if(data.lastResult)$('lastResult').textContent='Última corrida: '+(data.lastResult.retired?'não concluiu':data.lastResult.rank+'º · '+formatTime(data.lastResult.time));
+   ready=data.ready===true;$('ready').textContent=ready?'Cancelar pronto':'Estou pronto';$('ready').setAttribute('aria-pressed',String(ready));$('ready').disabled=false;
+   $('readyCount').textContent=(data.readyCount??0)+' / '+(data.playerCount??0)+' pilotos prontos';
+   $('lobby').hidden=phase!=='lobby';$('countdown').hidden=phase!=='countdown';$('countdown').textContent=data.countdown||3;
+   $('pause').hidden=phase!=='racing';$('pause').disabled=data.paused===true;
+   if(data.paused||phase!=='racing')clearPauseRequest();
+   const next=data.status==='racing'&&!data.paused;if(next!==racing){racing=next;if(!armed())release();}
+   $('pad').classList.toggle('offline',!armed());$('power').disabled=!armed();
+   $('countdown').hidden=phase!=='countdown'||!data.countdown;
+   const result=data.result;
+   if(data.status==='lobby'){$('raceTime').textContent='0:00.00';$('lapTime').textContent='0:00.00';$('speed').textContent='0';$('rank').textContent='—';$('lap').textContent='1/'+(data.totalLaps??2);$('charge').value=1;$('energy').textContent='100%';}
+   $('message').textContent=data.paused?'Corrida pausada. Retome no aparelho do jogo.':phase==='countdown'?(data.countdown?'Prepare os polegares.':'Está pronto?'):racing?'Olhe para a pista. Os dois polegares cuidam do resto.':data.status==='finished'?(result?(result.retired?'Você saiu da corrida.':result.rank+'º lugar · '+result.time.toFixed(1)+' s'):'Corrida encerrada.'):(ready?'Você está pronto. Aguarde os outros pilotos e a largada no aparelho do jogo.':'Toque em Estou pronto para liberar a largada.');
+  }
+ };
+ socket.onclose=()=>{racing=false;clearPauseRequest();$('pause').disabled=true;release();$('pad').classList.add('offline');$('power').disabled=true;$('status').textContent=leaving?'Desconectado':'Reconectando…';if(!leaving)retry=setTimeout(connect,1000);};
+ socket.onerror=()=>{$('error').textContent='Não encontramos o jogo. Confira o Wi-Fi e se a sala continua aberta.';};
+}
+$('ready').onclick=()=>{if(socket?.readyState===1&&phase==='lobby'){$('ready').disabled=true;socket.send(JSON.stringify({type:'ready',ready:!ready}));}};
+$('pause').onclick=()=>{if(socket?.readyState===1&&racing)socket.send(JSON.stringify({type:'pause'}));};
+$('join').onsubmit=event=>{event.preventDefault();name=$('name').value.trim();if(!name)return;localStorage.setItem('voltaName',name);connect();};
+$('leave').onclick=()=>{leaving=true;release();if(socket?.readyState===1)socket.send(JSON.stringify({type:'leave'}));socket?.close();token=null;sessionStorage.removeItem(storageKey);$('join').style.display='block';$('pad').style.display='none';$('leave').hidden=true;};
+const pedal=$('power');
+pedal.onpointerdown=event=>{event.preventDefault();if(!armed()||powerPointer!==null)return;powerPointer=event.pointerId;powerStart=event.clientY;pedal.setPointerCapture(event.pointerId);power('go');};
+pedal.onpointermove=event=>{if(event.pointerId!==powerPointer)return;const delta=event.clientY-powerStart;const threshold=Math.max(32,Math.min(50,pedal.clientHeight*.2));const hysteresis=powerMode==='go'?0:10;power(delta < -threshold+(powerMode==='boost'?hysteresis:0)?'boost':delta>threshold-(powerMode==='reverse'?hysteresis:0)?'reverse':'go');};
+const pedalUp=event=>{if(event.pointerId!==powerPointer)return;powerPointer=null;power(null);};pedal.onpointerup=pedalUp;pedal.onpointercancel=pedalUp;pedal.onlostpointercapture=pedalUp;pedal.oncontextmenu=event=>event.preventDefault();
+pedal.onkeydown=event=>{if(!racing)return;if(event.code==='Space'){event.preventDefault();power(event.shiftKey?'boost':'go');}if(event.code==='ArrowDown'){event.preventDefault();power('reverse');}};pedal.onkeyup=()=>power(null);
+const wheel=$('steering');
+document.addEventListener('gesturestart',event=>event.preventDefault());
+wheel.onpointerdown=event=>{event.preventDefault();if(!armed()||steeringPointer!==null)return;steeringPointer=event.pointerId;steeringStart=event.clientX;wheel.setPointerCapture(event.pointerId);wheel.classList.add('active');direction(0);};
+wheel.onpointermove=event=>{if(event.pointerId===steeringPointer)direction((event.clientX-steeringStart)/Math.max(60,Math.min(100,wheel.clientWidth*.4)));};
+const center=event=>{if(event.pointerId!==steeringPointer)return;steeringPointer=null;wheel.classList.remove('active');direction(0);};wheel.onpointerup=center;wheel.onpointercancel=center;wheel.onlostpointercapture=center;
+wheel.onkeydown=event=>{if(!racing)return;if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();direction(event.key==='ArrowLeft'?-1:1);}};wheel.onkeyup=()=>direction(0);
+$('sensitivity').oninput=()=>{const value=$('sensitivity').value;$('sensitivityValue').textContent=Math.round(value*100)+'%';localStorage.setItem('voltaSensitivity',value);};$('sensitivity').oninput();
+function stopTilt(message='Direção por toque ativada.'){tiltMode=false;clearTimeout(sensorTimer);tiltZero=null;direction(0);$('tilt').textContent='Usar inclinação';$('tilt').setAttribute('aria-pressed','false');$('calibrate').hidden=true;$('sensorStatus').textContent=message;}
+$('tilt').onclick=async()=>{
+ if(tiltMode){stopTilt();return;}
+ if(!window.isSecureContext){stopTilt('Este endereço local usa HTTP. O navegador exige HTTPS confiável para liberar a inclinação. Abra o link Configurar inclinação no iPhone abaixo para preparar o HTTPS local. O toque continua disponível.');return;}
+ if(!window.DeviceOrientationEvent){stopTilt('Este navegador não oferece o sensor de inclinação.');return;}
+ try{
+  if(typeof DeviceOrientationEvent.requestPermission==='function'&&await DeviceOrientationEvent.requestPermission()!=='granted'){stopTilt('Permissão do sensor não concedida. O toque continua disponível.');return;}
+  tiltMode=true;tiltZero=null;tiltValue=0;$('tilt').textContent='Usar toque';$('tilt').setAttribute('aria-pressed','true');$('calibrate').hidden=false;$('sensorStatus').textContent='Segure o celular confortável. A posição atual será o centro.';
+  sensorTimer=setTimeout(()=>{if(tiltZero===null)stopTilt('O sensor não respondeu. Continue usando o toque.');},2500);
+ }catch(_){stopTilt('Não foi possível ativar o sensor. Continue usando o toque.');}
+};
+addEventListener('deviceorientation',event=>{
+ if(!tiltMode||document.hidden||!Number.isFinite(event.beta)||!Number.isFinite(event.gamma))return;
+ const angle=(screen.orientation?.angle??window.orientation??0)*Math.PI/180;
+ const lateral=event.gamma*Math.cos(angle)+event.beta*Math.sin(angle);
+ if(tiltZero===null){tiltZero=lateral;clearTimeout(sensorTimer);$('sensorStatus').textContent='Incline suavemente. Use Centralizar para ajustar o centro.';}
+ if(!racing||steeringPointer!==null)return;
+ const delta=Math.max(-1,Math.min(1,(lateral-tiltZero)/25));tiltValue+=(delta-tiltValue)*.18;direction(tiltValue);
+});
+$('calibrate').onclick=()=>{tiltZero=null;tiltValue=0;direction(0);};
+addEventListener('orientationchange',release);addEventListener('blur',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
+setInterval(()=>{if(socket?.readyState===1){input();socket.send(JSON.stringify({type:'ping',sentAt:performance.now()}));}},300);
+if(token&&name)connect();
+</script></html>

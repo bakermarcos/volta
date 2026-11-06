@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+  <rect width="1280" height="720" fill="#111918"/>
+  <g transform="translate(330,270)">
+    <g transform="skewX(-10)">
+      <text x="24" y="128" fill="#F4F7F2" font-family="Arial Black, Impact, sans-serif" font-size="112" font-weight="900">VOLTA</text>
+    </g>
+    <polygon points="430,58 610,58 598,70 418,70" fill="#BDFE55"/>
+    <polygon points="454,84 610,84 600,94 444,94" fill="#F4F7F2" opacity=".85"/>
+    <polygon points="486,110 590,110 582,118 478,118" fill="#BDFE55" opacity=".55"/>
+  </g>
+</svg>
