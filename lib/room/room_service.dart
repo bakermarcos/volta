@@ -32,11 +32,17 @@ class RoomSnapshot {
 }
 
 class RoomService {
-  RoomService(this.controllerHtml, {this.history, this.httpsDirectory});
+  RoomService(
+    this.controllerHtml, {
+    this.history,
+    this.httpsDirectory,
+    this.kartModel = const [],
+  });
   final Directory? httpsDirectory;
   HttpServer? _secureServer;
   final Map<String, Object> Function()? history;
   final String controllerHtml;
+  final List<int> kartModel;
   final _changes = StreamController<RoomSnapshot>.broadcast();
   final _players = <String, Driver>{};
   final _sockets = <String, WebSocket>{};
@@ -145,6 +151,15 @@ class RoomService {
       request.response.write(
         '''<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Inclinação no iPhone · Volta</title><style>body{font:18px system-ui;background:#111918;color:#f1f4ee;max-width:600px;margin:40px auto;padding:24px;line-height:1.6}a{color:#bdfe55}li{margin:20px 0}</style><h1>Inclinação no iPhone</h1>${secure == null ? '<p>HTTPS ainda não foi preparado neste aparelho. O controle por toque funciona normalmente.</p>' : '<p>Este certificado pertence ao seu Mac. Instale apenas se esta for a sua sala na sua rede Wi-Fi.</p><ol><li><a href="/$code/volta-ca.cer">Baixar certificado Volta Wi-Fi Local CA</a> pelo Safari.</li><li>Abra Ajustes → Geral → VPN e Gerenciamento de Dispositivo e instale o perfil baixado.</li><li>Abra Ajustes → Geral → Sobre → Ajustes de Confiança de Certificado. Ative confiança total para Volta Wi-Fi Local CA.</li><li><a href="$url">Abrir controle HTTPS</a>, entre na sala e toque em Usar inclinação nos ajustes do controle.</li></ol><p>Se houver aviso de certificado, confira instalação e confiança antes de continuar. Mudou o IP do Mac? Gere novamente o certificado no Mac e reabra a sala.</p><p>Para remover, apague o perfil nos Ajustes.</p>'}<p><a href="/$code">Voltar ao controle por toque</a></p></html>''',
       );
+      await request.response.close();
+      return;
+    }
+    if (request.method == 'GET' && request.uri.path == '/$code/kart.glb') {
+      request.response.headers.contentType = ContentType(
+        'model',
+        'gltf-binary',
+      );
+      request.response.add(kartModel);
       await request.response.close();
       return;
     }
@@ -454,6 +469,16 @@ class RoomService {
     _lastResults
       ..clear()
       ..addAll(_results);
+    _publish();
+  }
+
+  void replay() {
+    status = 'countdown';
+    countdown = 3;
+    paused = false;
+    _pauseRequests.clear();
+    _results.clear();
+    _inputs.clear();
     _publish();
   }
 

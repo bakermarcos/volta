@@ -30,12 +30,13 @@ class Circuit {
           (distances[segment + 1] - distances[segment]);
       return (x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t);
     });
-    while (overlapsRoad(margin: 20)) {
+    for (var attempt = 0; attempt < 8 && overlapsRoad(margin: 20); attempt++) {
       for (var i = 0; i < points.length; i++) {
         points[i] = (x: points[i].x * 1.15, y: points[i].y * 1.15);
       }
       length *= 1.15;
     }
+    _alignStart();
     minX = points.map((p) => p.x).reduce(math.min);
     maxX = points.map((p) => p.x).reduce(math.max);
     minY = points.map((p) => p.y).reduce(math.min);
@@ -56,10 +57,8 @@ class Circuit {
   ]);
   static final catalog = [
     island,
-    for (final entry in arcadeLayouts.entries)
-      Circuit(entry.key, [
-        for (final (x, y) in entry.value) (x * 400, y * 400),
-      ]),
+    for (final entry in referenceLayouts.entries)
+      Circuit(entry.key, entry.value),
   ];
 
   static List<TrackPoint> _rounded(List<TrackPoint> input, double radius) {
@@ -107,6 +106,41 @@ class Circuit {
   }
 
   double get driveableHalfWidth => width / 2 + 90;
+
+  void _alignStart() {
+    double dir(int index) {
+      final a = points[index % 512];
+      final b = points[(index + 1) % 512];
+      return math.atan2(b.y - a.y, b.x - a.x);
+    }
+
+    double bend(int index) {
+      final delta = dir(index + 1) - dir(index);
+      return math.atan2(math.sin(delta), math.cos(delta)).abs();
+    }
+
+    const ahead = 28;
+    var bestAt = 0;
+    var best = double.infinity;
+    for (var i = 0; i < 512; i++) {
+      var score = 0.0;
+      for (var k = 0; k < ahead; k++) {
+        score += bend(i + k);
+      }
+      for (var k = 1; k <= 8; k++) {
+        score += bend(i - k) * .4;
+      }
+      if (score < best) {
+        best = score;
+        bestAt = i;
+      }
+    }
+    if (bestAt == 0) return;
+    final shifted = [for (var i = 0; i <= 512; i++) points[(bestAt + i) % 512]];
+    for (var i = 0; i <= 512; i++) {
+      points[i] = shifted[i];
+    }
+  }
 
   Circuit._variant(
     Circuit source, {

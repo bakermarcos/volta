@@ -14,13 +14,14 @@ class SessionState {
   const SessionState({
     this.busy = false,
     this.local = false,
+    this.timeTrial = false,
     this.localPlayers = 1,
     this.room,
     this.code,
     this.addresses = const [],
     this.error,
   });
-  final bool busy, local;
+  final bool busy, local, timeTrial;
   final int localPlayers;
   final RoomSnapshot? room;
   final String? code, error;
@@ -66,15 +67,18 @@ class Session extends ChangeNotifier {
     if (notify) notifyListeners();
   }
 
-  void local({int players = 1}) =>
-      _set(SessionState(local: true, localPlayers: players));
-  Future<void> open() async {
-    _set(const SessionState(busy: true));
+  void local({int players = 1, bool timeTrial = false}) => _set(
+    SessionState(local: true, localPlayers: players, timeTrial: timeTrial),
+  );
+  Future<void> open({bool timeTrial = false}) async {
+    _set(SessionState(busy: true, timeTrial: timeTrial));
     try {
       final html = await rootBundle.loadString('assets/controller.html');
+      final kart = await rootBundle.load('assets/karts/kart_low_poly.glb');
       await ready;
       final service = RoomService(
         html,
+        kartModel: kart.buffer.asUint8List(),
         history: () => history.snapshot,
         httpsDirectory: Directory('${history.file.parent.path}/https'),
       );
@@ -83,6 +87,7 @@ class Session extends ChangeNotifier {
       _room = service.changes.listen(
         (room) => _set(
           SessionState(
+            timeTrial: timeTrial,
             room: room,
             code: service.code,
             addresses: service.addresses,
@@ -102,6 +107,7 @@ class Session extends ChangeNotifier {
       );
       _set(
         SessionState(
+          timeTrial: timeTrial,
           room: service.snapshot,
           code: service.code,
           addresses: service.addresses,
@@ -148,6 +154,7 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  void replay() => _service?.replay();
   void reset() => _service?.reset();
   void removeDisconnected() => _service?.removeDisconnected();
   Future<void> leave() async {

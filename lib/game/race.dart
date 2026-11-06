@@ -76,6 +76,7 @@ class Race {
     this.turbo = false,
     this.mirrored = false,
     this.reversed = false,
+    this.timeTrial = false,
   }) : circuit = circuit ?? Circuit.island,
        cars = [
          for (var i = 0; i < drivers.length; i++) Car(drivers[i], i, circuit),
@@ -92,7 +93,7 @@ class Race {
   }
   final Circuit circuit;
   final int totalLaps;
-  final bool turbo, mirrored, reversed;
+  final bool turbo, mirrored, reversed, timeTrial;
   late final List<Checkpoint> checkpoints;
   static Checkpoint _checkpoint(Circuit track, int index) {
     final angle = index * math.pi * 2 / checkpointCount,
@@ -172,12 +173,12 @@ class Race {
             (braking
                 ? 300
                 : car.boosting
-                ? 370
-                : 165) *
+                ? 555
+                : 247.5) *
             dt *
             pace;
       }
-      final maximum = (onRoad ? (car.boosting ? 410.0 : 270.0) : 195.0) * pace;
+      final maximum = (onRoad ? (car.boosting ? 615.0 : 405.0) : 195.0) * pace;
       if (car.speed > maximum) {
         car.speed = math.max(
           maximum,
