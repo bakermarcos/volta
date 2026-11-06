@@ -1,5 +1,9 @@
 # volta
 
+<p align="center">
+  <img src="assets/volta_logo.png" alt="volta" width="480">
+</p>
+
 Corrida arcade **3D para 1 a 6 pessoas**, com tela dividida no Mac ou na Android TV e controles no navegador dos celulares. O aparelho do jogo calcula uma única corrida e mostra uma câmera atrás do kart de cada piloto. Flutter Scene 0.24.3 renderiza a cena na GPU.
 
 ## Jogar
@@ -82,7 +86,7 @@ Cena e modelos de karts são reutilizados entre lobby e corrida; marcações, po
 - `lib/ui/host.dart`: lobby, escolha da pista, largada e resultado.
 - `assets/controller.html`: controle responsivo sem biblioteca JavaScript.
 
-Dependências conferidas no pub.dev e na API instalada: Flutter Scene **0.24.3**, fixado por ainda estar antes da versão 1.0; vector_math **2.4.4**; qr **4.0.1**. `hooks` 2.2.0 prepara os assets do Scene. A marca e o ícone estão em `assets/volta_logo.svg`, `assets/volta_icon.svg` e `assets/volta_banner.svg`. Nenhuma dependência de execução em Python. A extração pontual da imagem não faz parte do app.
+Dependências conferidas no pub.dev e na API instalada: Flutter Scene **0.24.3**, fixado por ainda estar antes da versão 1.0; vector_math **2.4.4**; qr **4.0.1**. `hooks` 2.2.0 prepara os assets do Scene. A marca e o ícone estão em `assets/volta_logo.svg`, `assets/volta_logo.png`, `assets/volta_icon.svg` e `assets/volta_banner.svg`. A prévia do link do repositório é `assets/volta_social_preview.png`. Nenhuma dependência de execução em Python. A extração pontual da imagem não faz parte do app.
 
 O Flame foi avaliado e não adicionado: a renderização 3D fica no Scene, sem sobrepor motores. Fluorite não foi adotado porque o site ainda apresenta acesso público como futuro. Os modelos e cenários são procedurais e originais; não usam personagens ou assets da Nintendo.
 
