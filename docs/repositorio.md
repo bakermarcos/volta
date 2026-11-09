@@ -25,3 +25,13 @@ Para autorizar outra pessoa numa branch dessas, sem dar a ela o merge da `master
 Quem for colaborador abre a branch com o prefixo `contrib/`, por exemplo `contrib/ajuste-hud`. Essa prefixo está fora da trava das branches do dono, então o autor empurra os commits dela. O pull request continua sujeito à regra da `master`: só entra depois do aceite, e só o dono faz o merge.
 
 Quem não é colaborador faz o pull request a partir de um fork. Não precisa de branch `contrib/`.
+
+## Segurança do repositório
+
+O código é público. A sala de jogo não é: ela só existe na rede da casa, e o endereço da TV não entra no repositório.
+
+A varredura de segredo, o bloqueio de push com segredo, o alerta de dependência vulnerável e o relato privado já estão ligados no GitHub.
+
+O arquivo `.github/dependabot.yml` pede a atualização semanal do Dart e do Flutter. Ele passa a valer quando estiver na `master`.
+
+Relato de falha fica em privado, pelo caminho descrito em [SECURITY.md](../SECURITY.md). Não abra issue pública com IP, código da sala ou certificado.

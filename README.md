@@ -6,6 +6,14 @@
 
 Corrida arcade **3D para 1 a 6 pessoas**, com tela dividida no Mac ou na Android TV e controles no navegador dos celulares. O aparelho do jogo calcula uma única corrida e mostra uma câmera atrás do kart de cada piloto. Flutter Scene 0.24.3 renderiza a cena na GPU.
 
+A TV ou o Mac desenha a corrida. Cada pessoa entra pelo navegador do celular, no mesmo Wi-Fi, sem instalar nada. A conexão é um WebSocket local. Cabe até seis pilotos.
+
+## Apoie
+
+O Volta é livre para jogar em casa. Sugestão e pull request são bem-vindos.
+
+Quem quiser ajudar a próxima versão pode apoiar pelo [GitHub Sponsors](https://github.com/sponsors/bakermarcos).
+
 ## Jogar
 
 Use release para jogar com desempenho real. Para desenvolvimento com hot reload, use `flutter run -d macos`; o modo debug não serve como referência de fluidez.
@@ -106,7 +114,7 @@ node --test test/controller_test.mjs
 flutter build macos --debug
 ```
 
-Os testes cobrem controles, ré, boost, recarga, curvas/voltas, os 16 traçados, grids de largada, divisão da tela de 1 a 6 vistas, seleção de pista, seis conexões locais, isolamento dos comandos, saída, reconexão, resultado, nova corrida, persistência após reinício e consulta do histórico pelo HTTP. A renderização precisa também de validação no Mac: testes de widget não exercitam a GPU.
+Os testes cobrem controles, ré, boost, recarga, curvas/voltas, os 16 traçados, grids de largada, divisão da tela de 1 a 6 vistas, seleção de pista, seis conexões locais, isolamento dos comandos, saída, reconexão, resultado, nova corrida, persistência após reinício e consulta do histórico pelo HTTP. Um teste de estresse segura seis WebSockets enviando comando junto e avança dez segundos de corrida com os seis karts dentro do orçamento de um quadro. A renderização precisa também de validação no Mac: testes de widget não exercitam a GPU.
 
 Ambiente: Flutter 3.47.2 / Dart 3.13.2 / Xcode 26.3 / macOS 26.3.1. Flutter GPU está habilitado em `macos/Runner/Info.plist`; o Scene compila seus shaders pelos build hooks. A primeira compilação é mais lenta. Ainda falta a rodada presencial com seis celulares no Wi-Fi real; os testes de rede usam sockets locais.
 
