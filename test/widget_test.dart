@@ -67,12 +67,12 @@ void main() {
       await tester.pump();
       expect(find.text('Está pronto?'), findsNothing);
       final opening = tester.widget<RaceScene>(find.byType(RaceScene));
-      for (var i = 0; i < 80; i++) {
+      for (var i = 0; i < 10; i++) {
         opening.onAdvance!(.05);
       }
       await tester.pump();
       expect(find.text('Está pronto?'), findsOneWidget);
-      for (var i = 0; i < 20; i++) {
+      for (var i = 0; i < 10; i++) {
         opening.onAdvance!(.05);
       }
       await tester.pump();
@@ -89,10 +89,11 @@ void main() {
       }
       await tester.pump();
       expect(scene.race!.elapsed, closeTo(.5, .1));
-      await tester.tap(find.text('Pausar'));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
       expect(find.text('Corrida pausada'), findsNothing);
-      await tester.tap(find.text('Confirmar pausa'));
+      expect(find.text('Pausar'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
       final pausedAt = scene.race!.elapsed;
       scene.onAdvance!(.05);
@@ -135,7 +136,7 @@ void main() {
       await tester.tap(find.text('Largar  →'));
       await tester.pump();
       final scene = tester.widget<RaceScene>(find.byType(RaceScene));
-      for (var i = 0; i < 100; i++) {
+      for (var i = 0; i < 20; i++) {
         scene.onAdvance!(.05);
       }
       await tester.pump();

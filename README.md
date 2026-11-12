@@ -1,6 +1,18 @@
 # volta
 
+<p align="center">
+  <img src="assets/volta_logo.png" alt="volta" width="480">
+</p>
+
 Corrida arcade **3D para 1 a 6 pessoas**, com tela dividida no Mac ou na Android TV e controles no navegador dos celulares. O aparelho do jogo calcula uma única corrida e mostra uma câmera atrás do kart de cada piloto. Flutter Scene 0.24.3 renderiza a cena na GPU.
+
+A TV ou o Mac desenha a corrida. Cada pessoa entra pelo navegador do celular, no mesmo Wi-Fi, sem instalar nada. A conexão é um WebSocket local. Cabe até seis pilotos.
+
+## Apoie
+
+O Volta é livre para jogar em casa. Sugestão e pull request são bem-vindos.
+
+Quem quiser ajudar a próxima versão pode apoiar pelo [GitHub Sponsors](https://github.com/sponsors/bakermarcos).
 
 ## Jogar
 
@@ -14,7 +26,7 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 ```
 
 1. Conecte Mac e celulares ao mesmo Wi-Fi.
-2. No Mac, clique em **Criar sala local**. Autorize o acesso à rede local caso o macOS solicite.
+2. No Mac ou na TV, toque em **Começar**. Autorize o acesso à rede local caso o macOS solicite. A instalação na TV está em [docs/instalacao.md](docs/instalacao.md).
 3. Clique no nome da pista para escolher um dos 16 traçados da referência ou a Ilha Brisa.
 4. Leia o QR com a câmera normal do celular e abra o endereço no Safari/Chrome. Também é possível digitar o endereço completo exibido no Mac.
 5. Digite o nome no celular e toque em **Estou pronto**. Quando todos estiverem prontos, clique em **Largar**. É possível jogar sozinho.
@@ -30,7 +42,7 @@ A corrida usa a tela inteira disponível: duas vistas para dois jogadores; três
 - **Turbo:** com o mesmo dedo no pedal, deslize para cima. Continua acelerando; volte ao centro para aceleração normal. Ao esgotar, volte ao centro antes de tentar novamente.
 - **Freio / ré:** deslize o mesmo dedo para baixo. Freia primeiro; mantendo pressionado, passa a andar de ré. Soltar o pedal freia.
 - **Inclinação:** opção com calibração para navegadores que oferecem sensores em contexto seguro. O HTTP pelo IP local normalmente bloqueia sensores: nessa situação a página explica e mantém o touch. O HTTPS local está disponível; veja a configuração para iPhone abaixo.
-- Na grama, o limite é 195 contra 270 no asfalto. A queda de velocidade é gradual. O turbo continua exclusivo do asfalto.
+- Na grama, o limite é 195 contra 405 no asfalto. O turbo no asfalto chega a 615. A queda de velocidade é gradual. O turbo continua exclusivo do asfalto.
 
 **Treinar com teclado:** Lima usa W/S, A/D e Shift; Azul usa ↑/↓, ←/→ e Espaço. Esc ou o botão Pausar pede uma pausa; repita em até quatro segundos para confirmar. Ao continuar, a simulação retoma sem acumular o tempo da pausa.
 
@@ -59,7 +71,7 @@ As pistas usam asfalto com 240 unidades de largura, suficiente para quatro karts
 
 Cada volta exige cruzar **16 checkpoints em ordem e no sentido correto**, contando também a faixa de grama de escape. A área de escape tem 90 unidades além do asfalto; uma barreira invisível, sinalizada pelos postes, impede sair desse corredor e atravessar o miolo. O limite acompanha o trecho atual da pista para evitar saltar para uma reta próxima. Cortar caminho não completa os checkpoints pulados: retorne ao trecho faltante. A tela não mostra o número do checkpoint. A chegada conta apenas depois de completar essa sequência, pelo número de voltas escolhido.
 
-A tela mostra tempo da corrida e da volta. Quando **todos menos um** terminam, o último tem **15 segundos** para chegar. Se chegar antes, encerra imediatamente; caso contrário, aparece como não concluído. Solo encerra na chegada. O resultado tem celebração, classificação, tempo total, melhor volta e tempos individuais. Volta ao lobby após oito segundos ou pelo botão, preservando configuração e último placar. Todos precisam confirmar Pronto para a próxima partida.
+A tela mostra tempo da corrida e da volta. Quando **todos menos um** terminam, o último tem **15 segundos** para chegar. Se chegar antes, encerra imediatamente; caso contrário, aparece como não concluído. Solo encerra na chegada. O resultado tem celebração, classificação, tempo total, melhor volta e tempos individuais. **Jogar de novo** repete a corrida. **Voltar ao lobby** preserva a configuração e o último placar. Todos precisam confirmar Pronto para a próxima partida.
 
 ## Inclinação no iPhone por HTTPS local
 
@@ -82,7 +94,7 @@ Cena e modelos de karts são reutilizados entre lobby e corrida; marcações, po
 - `lib/ui/host.dart`: lobby, escolha da pista, largada e resultado.
 - `assets/controller.html`: controle responsivo sem biblioteca JavaScript.
 
-Dependências conferidas no pub.dev e na API instalada: Flutter Scene **0.24.3**, fixado por ainda estar antes da versão 1.0; vector_math **2.4.4**; qr **4.0.1**. `hooks` 2.2.0 prepara os assets do Scene. A marca e o ícone estão em `assets/volta_logo.svg`, `assets/volta_icon.svg` e `assets/volta_banner.svg`. Nenhuma dependência de execução em Python. A extração pontual da imagem não faz parte do app.
+Dependências conferidas no pub.dev e na API instalada: Flutter Scene **0.24.3**, fixado por ainda estar antes da versão 1.0; vector_math **2.4.4**; qr **4.0.1**. `hooks` 2.2.0 prepara os assets do Scene. A marca e o ícone estão em `assets/volta_logo.svg`, `assets/volta_logo.png`, `assets/volta_icon.svg` e `assets/volta_banner.svg`. A prévia do link do repositório é `assets/volta_social_preview.png`. Nenhuma dependência de execução em Python. A extração pontual da imagem não faz parte do app.
 
 O Flame foi avaliado e não adicionado: a renderização 3D fica no Scene, sem sobrepor motores. Fluorite não foi adotado porque o site ainda apresenta acesso público como futuro. Os modelos e cenários são procedurais e originais; não usam personagens ou assets da Nintendo.
 
@@ -102,7 +114,7 @@ node --test test/controller_test.mjs
 flutter build macos --debug
 ```
 
-Os testes cobrem controles, ré, boost, recarga, curvas/voltas, os 16 traçados, grids de largada, divisão da tela de 1 a 6 vistas, seleção de pista, seis conexões locais, isolamento dos comandos, saída, reconexão, resultado, nova corrida, persistência após reinício e consulta do histórico pelo HTTP. A renderização precisa também de validação no Mac: testes de widget não exercitam a GPU.
+Os testes cobrem controles, ré, boost, recarga, curvas/voltas, os 16 traçados, grids de largada, divisão da tela de 1 a 6 vistas, seleção de pista, seis conexões locais, isolamento dos comandos, saída, reconexão, resultado, nova corrida, persistência após reinício e consulta do histórico pelo HTTP. Um teste de estresse segura seis WebSockets enviando comando junto e avança dez segundos de corrida com os seis karts dentro do orçamento de um quadro. A renderização precisa também de validação no Mac: testes de widget não exercitam a GPU.
 
 Ambiente: Flutter 3.47.2 / Dart 3.13.2 / Xcode 26.3 / macOS 26.3.1. Flutter GPU está habilitado em `macos/Runner/Info.plist`; o Scene compila seus shaders pelos build hooks. A primeira compilação é mais lenta. Ainda falta a rodada presencial com seis celulares no Wi-Fi real; os testes de rede usam sockets locais.
 
@@ -111,3 +123,9 @@ Se a assinatura falhar com `resource fork, Finder information` em uma pasta sinc
 ## Projeto Firebase anterior
 
 O projeto `volta-home-game-2026` foi criado antes da decisão de usar somente a rede local. Não integra esta versão nem recebe dados do jogo. O banco foi fechado para leitura/escrita e o login anônimo foi desativado. Excluir esse projeto é uma ação independente do aplicativo.
+
+## Pesquisa
+
+Duas ideias foram estudadas e não estão implementadas: controle Bluetooth no celular com DualShock 4, e poderes na pista no estilo Mario Kart. O levantamento está em [docs/pesquisa.md](docs/pesquisa.md).
+
+Quem pode fazer merge na `master` e quem pode atualizar as outras branches está em [docs/repositorio.md](docs/repositorio.md).

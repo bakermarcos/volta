@@ -44,13 +44,13 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     reversed: _reversed,
   );
   bool _selectingCircuit = false;
-  Timer? _resultsTimer;
-  GlobalKey _sceneKey = GlobalKey();
   Timer? _pauseRequestTimer;
+  GlobalKey _sceneKey = GlobalKey();
   bool _pauseArmed = false;
   Circuit _circuit = Circuit.catalog.firstWhere((c) => c.name == 'Brasil');
   String? _address;
   double _countdown = 0, _intro = 1;
+  bool _sceneLive = false;
   double _telemetryAt = 0;
   bool _submitted = false;
   bool _paused = false;
@@ -84,7 +84,6 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     FocusManager.instance.removeListener(_revealFocus);
     WidgetsBinding.instance.removeObserver(this);
     _pauseRequestTimer?.cancel();
-    _resultsTimer?.cancel();
     _focus.dispose();
     _lobbyFocus.dispose();
     super.dispose();
@@ -105,7 +104,6 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   }
 
   void _begin(List<Driver> drivers) {
-    _resultsTimer?.cancel();
     _race = Race(
       drivers,
       circuit: _track,
@@ -113,9 +111,11 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       turbo: _turbo,
       mirrored: _mirrored,
       reversed: _reversed,
+      timeTrial: SessionScope.read(context).state.timeTrial,
     );
     _countdown = 0;
     _intro = 0;
+    _sceneLive = false;
     _telemetryAt = 0;
     _submitted = false;
     _startMs = DateTime.now().millisecondsSinceEpoch;
@@ -125,7 +125,8 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   }
 
   void _advance(double seconds) {
-    final dt = seconds.clamp(0.0, .05);
+    if (!mounted) return;
+    final dt = seconds.isFinite ? seconds.clamp(0.0, .05) : 0.0;
     final session = SessionScope.read(context).state;
     final room = session.room;
     if (!session.local && room?.status == 'countdown' && _race == null) {
@@ -138,18 +139,26 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       setState(() {
         _race = null;
         _countdown = 0;
+        _sceneLive = false;
       });
       return;
     }
     final race = _race;
     if (race == null || race.finished) return;
+    // SceneView does not tick until warm-up reveals the track. A zero delta
+    // is the scene graph positioning itself, so the ready cue waits for a
+    // real frame and is not drawn over the loading screen.
+    if (!_sceneLive) {
+      if (dt <= 0) return;
+      _sceneLive = true;
+    }
     if (_intro < 1) {
-      _intro = math.min(1, _intro + dt / 5);
+      _intro = math.min(1, _intro + dt);
       if (_intro == 1) {
         _countdown = 3;
         if (!session.local) SessionScope.read(context).start();
       }
-      if (mounted) setState(() {});
+      setState(() {});
       return;
     }
     if (room?.paused == true && !_paused) {
@@ -225,13 +234,14 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     if (race.finished && !_submitted) {
       setState(() => _submitted = true);
       SessionScope.read(context).finish(race);
-      _resultsTimer = Timer(const Duration(seconds: 8), _rematch);
     }
   }
 
   void _keyEvent(KeyEvent event) {
     if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.escape) {
+        (event.logicalKey == LogicalKeyboardKey.escape ||
+            event.logicalKey == LogicalKeyboardKey.goBack ||
+            event.logicalKey == LogicalKeyboardKey.mediaPlayPause)) {
       _requestPause();
       return;
     }
@@ -240,7 +250,13 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   }
 
   void _requestPause() {
-    if (_paused || _race == null || _race!.finished || _countdown > 0) return;
+    if (_paused ||
+        _race == null ||
+        _race!.finished ||
+        _countdown > 0 ||
+        _intro < 1) {
+      return;
+    }
     if (_pauseArmed) {
       _pauseRequestTimer?.cancel();
       setState(() => _pauseArmed = false);
@@ -263,7 +279,9 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     final leave = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
+      barrierColor: const Color(0x33000000),
       builder: (context) => AlertDialog(
+        backgroundColor: ink.withValues(alpha: .5),
         title: const Text('Corrida pausada'),
         content: const Text('Os carros estão parados. Pronto para continuar?'),
         actions: [
@@ -324,17 +342,13 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                       race: race,
                       circuit: _track,
                       onAdvance: _advance,
-                      approach: _intro < .8 ? 0 : (_intro - .8) / .2,
+                      approach: .85 + .15 * _intro.clamp(0.0, 1.0),
                       tvMode: tvMode,
                     ),
                   ),
-                  if (_intro < 1 || _countdown > 0)
+                  if (_sceneLive && (_intro < 1 || _countdown > 0))
                     Text(
-                      _intro < .8
-                          ? 'Carregando a pista'
-                          : _intro < 1
-                          ? 'Está pronto?'
-                          : '${_countdown.ceil()}',
+                      _intro < 1 ? 'Está pronto?' : '${_countdown.ceil()}',
                       style: TextStyle(
                         fontSize: _intro < 1 ? 36 : 96,
                         color: lime,
@@ -361,16 +375,16 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  if (!race.finished)
-                    Positioned(
-                      top: MediaQuery.sizeOf(context).height * .05,
-                      left: MediaQuery.sizeOf(context).width / 2 - 85,
-                      child: FilledButton.tonalIcon(
-                        onPressed: _intro < 1 || _countdown > 0
-                            ? null
-                            : _requestPause,
-                        icon: const Icon(Icons.pause),
-                        label: Text(_pauseArmed ? 'Confirmar pausa' : 'Pausar'),
+                  if (_pauseArmed && !race.finished)
+                    const Center(
+                      child: Text(
+                        'Pausar',
+                        style: TextStyle(
+                          color: Color(0xE6FFFFFF),
+                          fontSize: 56,
+                          fontWeight: FontWeight.w800,
+                          shadows: [Shadow(color: ink, blurRadius: 16)],
+                        ),
                       ),
                     ),
                 ],
@@ -380,247 +394,278 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
         ),
       );
     }
-    return KeyboardListener(
-      focusNode: _focus,
-      onKeyEvent: _keyEvent,
-      child: _StopEdge(
-        child: Scaffold(
-          body: SafeArea(
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: MediaQuery.sizeOf(context).width * .045,
-                vertical: MediaQuery.sizeOf(context).height * .04,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const VoltaMark(height: 34),
-                      const Spacer(),
-                      if (!Platform.isAndroid)
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) SessionScope.read(context).leave();
+      },
+      child: KeyboardListener(
+        focusNode: _focus,
+        onKeyEvent: _keyEvent,
+        child: _StopEdge(
+          child: Scaffold(
+            body: SafeArea(
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: MediaQuery.sizeOf(context).width * .045,
+                  vertical: MediaQuery.sizeOf(context).height * .04,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const VoltaMark(height: 34),
+                        const Spacer(),
+                        if (!Platform.isAndroid)
+                          TextButton(
+                            onPressed: SessionScope.read(context).toggleTvMode,
+                            child: Text(tvMode ? 'Sair do modo TV' : 'Modo TV'),
+                          ),
                         TextButton(
-                          onPressed: SessionScope.read(context).toggleTvMode,
-                          child: Text(tvMode ? 'Sair do modo TV' : 'Modo TV'),
+                          onPressed: () => showRaceHistory(context),
+                          child: const Text('Histórico'),
                         ),
-                      TextButton(
-                        onPressed: () => showRaceHistory(context),
-                        child: const Text('Histórico'),
-                      ),
-                      TextButton(
-                        onPressed: () => SessionScope.read(context).leave(),
-                        child: const Text('Sair'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final menu = Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                SizedBox(
-                                  width: 120,
-                                  height: 68,
-                                  child: CustomPaint(
-                                    painter: CircuitThumbnail(
-                                      _track,
-                                      color: lime,
-                                    ),
-                                    child: const SizedBox.expand(),
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                const Expanded(
-                                  child: Text(
-                                    'Próxima corrida',
-                                    style: TextStyle(
-                                      fontSize: 28,
-                                      fontWeight: FontWeight.bold,
-                                      height: 1.15,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Padding(
-                              padding: const EdgeInsets.only(left: 136),
-                              child: Text(
-                                '$_laps voltas${_turbo ? ' · Turbo' : ''}${_reversed ? ' · Inverso' : ''}${_mirrored ? ' · Espelhado' : ''}',
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  color: muted,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            OutlinedButton.icon(
-                              focusNode: _lobbyFocus,
-                              onPressed: _selectCircuit,
-                              icon: const Icon(Icons.route),
-                              label: Text(
-                                _circuit.name,
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            OutlinedButton.icon(
-                              onPressed: _settings,
-                              icon: const Icon(Icons.tune),
-                              label: const Text('Configurações'),
-                            ),
-                            const SizedBox(height: 24),
-                            FilledButton.icon(
-                              onPressed:
-                                  connected >= 1 &&
-                                      (session.local || room?.canStart == true)
-                                  ? () {
-                                      if (session.local) {
-                                        setState(() => _begin(players));
-                                      } else {
-                                        setState(
-                                          () => _begin(
-                                            players
-                                                .where((p) => p.connected)
-                                                .toList(),
-                                          ),
-                                        );
-                                      }
-                                    }
-                                  : null,
-                              icon: const Icon(Icons.sports_score),
-                              label: const Text('Largar  →'),
-                            ),
-                            const SizedBox(height: 16),
-                            if (session.error != null)
-                              Text(
-                                session.error!,
-                                style: const TextStyle(color: Colors.orange),
-                              ),
-                          ],
-                        );
-                        final preview = Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            AspectRatio(
-                              aspectRatio: 1.7,
-                              child: TickerMode(
-                                enabled: !_selectingCircuit,
-                                child: RaceScene(
-                                  key: _sceneKey,
-                                  circuit: _track,
-                                  onAdvance: _advance,
-                                  tvMode: tvMode,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            Text(
-                              _circuit.name,
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              players.isEmpty
-                                  ? 'Conecte os celulares pelo QR.'
-                                  : '${players.where((p) => p.connected && p.ready).length}/$connected pilotos prontos',
-                              style: const TextStyle(
-                                color: muted,
-                                fontSize: 18,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final player in players)
-                                  Chip(
-                                    avatar: Icon(
-                                      player.ready && player.connected
-                                          ? Icons.check_circle
-                                          : Icons.hourglass_top,
-                                      color: Color(player.color),
-                                      size: 22,
-                                    ),
-                                    label: Text(
-                                      player.name,
-                                      style: const TextStyle(fontSize: 18),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        );
-                        if (constraints.maxWidth < 800) {
-                          return ListView(
+                        TextButton(
+                          onPressed: () => SessionScope.read(context).leave(),
+                          child: const Text('Voltar'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final menu = Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              menu,
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 120,
+                                    height: 68,
+                                    child: CustomPaint(
+                                      painter: CircuitThumbnail(
+                                        _track,
+                                        color: lime,
+                                      ),
+                                      child: const SizedBox.expand(),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  const Expanded(
+                                    child: Text(
+                                      'Próxima corrida',
+                                      style: TextStyle(
+                                        fontSize: 28,
+                                        fontWeight: FontWeight.bold,
+                                        height: 1.15,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Padding(
+                                padding: const EdgeInsets.only(left: 136),
+                                child: Text(
+                                  '$_laps voltas${_turbo ? ' · Turbo' : ''}${_reversed ? ' · Inverso' : ''}${_mirrored ? ' · Espelhado' : ''}',
+                                  style: const TextStyle(
+                                    fontSize: 20,
+                                    color: muted,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              OutlinedButton.icon(
+                                focusNode: _lobbyFocus,
+                                onPressed: _selectCircuit,
+                                icon: const Icon(Icons.route),
+                                label: Text(
+                                  _circuit.name,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              OutlinedButton.icon(
+                                onPressed: _settings,
+                                icon: const Icon(Icons.tune),
+                                label: const Text('Configurações'),
+                              ),
                               const SizedBox(height: 24),
-                              preview,
-                              const SizedBox(height: 24),
-                              _sidebar(session, players, connected),
+                              FilledButton.icon(
+                                onPressed:
+                                    connected >= 1 &&
+                                        (session.local ||
+                                            room?.canStart == true)
+                                    ? () {
+                                        if (session.local) {
+                                          setState(() => _begin(players));
+                                        } else {
+                                          setState(
+                                            () => _begin(
+                                              players
+                                                  .where((p) => p.connected)
+                                                  .toList(),
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    : null,
+                                icon: const Icon(Icons.sports_score),
+                                label: const Text('Largar  →'),
+                              ),
+                              const SizedBox(height: 16),
+                              if (session.error != null)
+                                Text(
+                                  session.error!,
+                                  style: const TextStyle(color: Colors.orange),
+                                ),
                             ],
                           );
-                        }
-                        if (constraints.maxWidth < 1100) {
+                          final preview = Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              AspectRatio(
+                                aspectRatio: 1.7,
+                                child: TickerMode(
+                                  enabled: !_selectingCircuit,
+                                  child: RaceScene(
+                                    key: _sceneKey,
+                                    circuit: _track,
+                                    onAdvance: _advance,
+                                    tvMode: tvMode,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Text(
+                                _circuit.name,
+                                style: const TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              if (SessionScope.read(context).state.timeTrial)
+                                const Text(
+                                  'Tempo na pista',
+                                  style: TextStyle(color: lime, fontSize: 16),
+                                ),
+                              Builder(
+                                builder: (context) {
+                                  final record = SessionScope.read(context)
+                                      .history
+                                      .bestOn(_circuit.name);
+                                  if (record == null) return const SizedBox();
+                                  return Text(
+                                    'Recorde ${record.name} · ${formatRaceTime(record.time)}',
+                                    style: const TextStyle(
+                                      color: muted,
+                                      fontSize: 16,
+                                    ),
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                players.isEmpty
+                                    ? 'Conecte os celulares pelo QR.'
+                                    : '${players.where((p) => p.connected && p.ready).length}/$connected pilotos prontos',
+                                style: const TextStyle(
+                                  color: muted,
+                                  fontSize: 18,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final player in players)
+                                    Chip(
+                                      avatar: Icon(
+                                        player.ready && player.connected
+                                            ? Icons.check_circle
+                                            : Icons.hourglass_top,
+                                        color: Color(player.color),
+                                        size: 22,
+                                      ),
+                                      label: Text(
+                                        player.name,
+                                        style: const TextStyle(fontSize: 18),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          );
+                          if (constraints.maxWidth < 800) {
+                            return ListView(
+                              children: [
+                                menu,
+                                const SizedBox(height: 24),
+                                preview,
+                                const SizedBox(height: 24),
+                                _sidebar(session, players, connected),
+                              ],
+                            );
+                          }
+                          if (constraints.maxWidth < 1100) {
+                            return FocusTraversalGroup(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: SingleChildScrollView(child: menu),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  SizedBox(
+                                    width: 340,
+                                    child: SingleChildScrollView(
+                                      child: _sidebar(
+                                        session,
+                                        players,
+                                        connected,
+                                        showPlayers: true,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
                           return FocusTraversalGroup(
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Expanded(
+                                  flex: 4,
                                   child: SingleChildScrollView(child: menu),
+                                ),
+                                const SizedBox(width: 32),
+                                Expanded(
+                                  flex: 5,
+                                  child: SingleChildScrollView(child: preview),
                                 ),
                                 const SizedBox(width: 24),
                                 SizedBox(
-                                  width: 340,
+                                  width: 280,
                                   child: SingleChildScrollView(
                                     child: _sidebar(
                                       session,
                                       players,
                                       connected,
-                                      showPlayers: true,
                                     ),
                                   ),
                                 ),
                               ],
                             ),
                           );
-                        }
-                        return FocusTraversalGroup(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                flex: 4,
-                                child: SingleChildScrollView(child: menu),
-                              ),
-                              const SizedBox(width: 32),
-                              Expanded(
-                                flex: 5,
-                                child: SingleChildScrollView(child: preview),
-                              ),
-                              const SizedBox(width: 24),
-                              SizedBox(
-                                width: 280,
-                                child: SingleChildScrollView(
-                                  child: _sidebar(session, players, connected),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                        },
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -840,12 +885,27 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _playAgain() async {
+    final previous = _race;
+    if (previous == null) return;
+    final session = SessionScope.read(context);
+    await session.finish(previous);
+    if (!mounted) return;
+    final drivers = [for (final car in previous.cars) car.driver];
+    setState(() {
+      _begin(drivers);
+      _intro = 1;
+      _countdown = 3;
+      _sceneLive = true;
+    });
+    if (!session.state.local) session.replay();
+  }
+
   Future<void> _rematch() async {
     final session = SessionScope.read(context);
     await session.finish(_race!);
     if (!mounted) return;
     session.reset();
-    _resultsTimer?.cancel();
     setState(() {
       _lastRace = _race;
       _race = null;
@@ -875,6 +935,11 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                 ? 'CORRIDA ENCERRADA'
                 : '${race.standings.first.driver.name} VENCEU!',
             style: TextStyle(letterSpacing: 3, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            race.circuit.name,
+            style: const TextStyle(color: lime, fontSize: 16),
           ),
           const SizedBox(height: 16),
           for (var i = 0; i < race.standings.length; i++)
@@ -906,8 +971,13 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
           const SizedBox(height: 16),
           FilledButton(
             autofocus: true,
+            onPressed: _playAgain,
+            child: const Text('Jogar de novo'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
             onPressed: _rematch,
-            child: const Text('Voltar ao lobby  →'),
+            child: const Text('Voltar ao lobby'),
           ),
           TextButton(
             onPressed: () => showRaceHistory(context),

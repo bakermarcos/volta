@@ -12,10 +12,11 @@ Future<void> showRaceHistory(BuildContext context) async {
     context: context,
     builder: (context) {
       final data = session.history.snapshot;
+      final size = MediaQuery.sizeOf(context);
       return Dialog(
         child: SizedBox(
-          width: 560,
-          height: 600,
+          width: size.width < 640 ? size.width * .92 : 560,
+          height: size.height * .86,
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -33,6 +34,8 @@ Future<void> showRaceHistory(BuildContext context) async {
                       ),
                     ),
                     IconButton(
+                      autofocus: true,
+                      tooltip: 'Fechar',
                       onPressed: () => Navigator.pop(context),
                       icon: const Icon(Icons.close),
                     ),
@@ -54,36 +57,18 @@ Future<void> showRaceHistory(BuildContext context) async {
                       if (session.history.races.isEmpty)
                         const Text('As corridas concluídas aparecerão aqui.'),
                       for (final leader in data['leaders'] as List)
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(leader['name'] as String),
-                          trailing: Text(
-                            '${leader['wins']} vitórias · ${leader['races']} corridas',
-                          ),
+                        _historyRow(
+                          '${leader['name']} · ${leader['wins']} vitórias · ${leader['races']} corridas',
                         ),
                       for (final race in data['races'] as List) ...[
                         const Divider(height: 32),
-                        Text(
-                          race['circuit'] as String,
-                          style: const TextStyle(
-                            color: lime,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          DateTime.parse(race['date'] as String)
-                              .toLocal()
-                              .toString()
-                              .split('.')
-                              .first,
-                          style: const TextStyle(color: muted, fontSize: 12),
+                        _historyRow(
+                          '${race['circuit']}\n${DateTime.parse(race['date'] as String).toLocal().toString().split('.').first}',
+                          accent: true,
                         ),
                         for (final result in race['results'] as List)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              '${result['rank']}. ${result['name']} · ${result['time'] == null ? 'SAIU' : formatRaceTime((result['time'] as num).toDouble())}${(result['laps'] as List?)?.isNotEmpty == true ? '\nVoltas: ${(result['laps'] as List).map((v) => formatRaceTime((v as num).toDouble())).join(' / ')}' : ''}',
-                            ),
+                          _historyRow(
+                            '${result['rank']}. ${result['name']} · ${result['time'] == null ? 'SAIU' : formatRaceTime((result['time'] as num).toDouble())}${(result['laps'] as List?)?.isNotEmpty == true ? '\nVoltas: ${(result['laps'] as List).map((v) => formatRaceTime((v as num).toDouble())).join(' / ')}' : ''}',
                           ),
                       ],
                     ],
@@ -97,3 +82,15 @@ Future<void> showRaceHistory(BuildContext context) async {
     },
   );
 }
+
+Widget _historyRow(String text, {bool accent = false}) => ListTile(
+  contentPadding: EdgeInsets.zero,
+  title: Text(
+    text,
+    style: TextStyle(
+      color: accent ? lime : null,
+      fontWeight: accent ? FontWeight.bold : null,
+    ),
+  ),
+  onTap: () {},
+);

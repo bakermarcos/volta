@@ -20,6 +20,7 @@ flutter:
   assets:
     - assets/controller.html
     - assets/volta_logo.png
+    - assets/karts/
     - flutter_scene_generated/
     - path: flutter_scene_generated/metal_ios/
       platforms:

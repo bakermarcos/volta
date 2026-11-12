@@ -297,4 +297,64 @@ void main() {
       expect(room.snapshot.players.map((p) => p.slot), [0, 1]);
     },
   );
+  test('six phones keep the room smooth under a sustained race', () async {
+    final drivers = <Peer>[];
+    for (var i = 0; i < maxPlayers; i++) {
+      drivers.add(await join('Pilot $i'));
+    }
+    await startReady();
+    final clock = Stopwatch()..start();
+    for (var tick = 0; tick < 50; tick++) {
+      for (final driver in drivers) {
+        driver.send({
+          'type': 'input',
+          'accelerate': true,
+          'steer': 0,
+        });
+      }
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    for (var i = 0; i < drivers.length; i++) {
+      drivers[i].send({
+        'type': 'input',
+        'accelerate': true,
+        'steer': i.isEven ? .5 : -.5,
+        'boost': i.isEven,
+      });
+    }
+    final settled = await room.changes
+        .firstWhere(
+          (snapshot) => drivers.every(
+            (driver) =>
+                snapshot.inputs[driver.token]?['steer'] ==
+                (drivers.indexOf(driver).isEven ? .5 : -.5),
+          ),
+        )
+        .timeout(const Duration(seconds: 2));
+    clock.stop();
+    expect(clock.elapsedMilliseconds, lessThan(2000));
+    for (final driver in drivers) {
+      expect(driver.socket.readyState, WebSocket.open);
+      expect(settled.inputs[driver.token]!['accelerate'], true);
+    }
+    final race = Race(room.snapshot.players);
+    final inputs = {
+      for (var i = 0; i < race.cars.length; i++)
+        race.cars[i].driver.id: ControlInput(
+          accelerate: true,
+          steer: (i - 2.5) / 5,
+        ),
+    };
+    final simulation = Stopwatch()..start();
+    const frames = 600;
+    for (var frame = 0; frame < frames; frame++) {
+      race.step(1 / 60, inputs);
+    }
+    simulation.stop();
+    expect(simulation.elapsedMicroseconds / frames, lessThan(8000));
+    expect(
+      race.cars.map((car) => car.speed.abs()).reduce((a, b) => a > b ? a : b),
+      greaterThan(100),
+    );
+  });
 }

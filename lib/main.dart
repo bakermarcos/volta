@@ -146,11 +146,14 @@ class EntryScreen extends StatelessWidget {
     final session = SessionScope.watch(context);
     final state = session.state;
     if (state.active) return const HostScreen();
+    final android = Platform.isAndroid;
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32),
+            padding: android
+                ? const EdgeInsets.symmetric(horizontal: 32, vertical: 16)
+                : const EdgeInsets.all(32),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 380),
               child: Column(
@@ -158,29 +161,37 @@ class EntryScreen extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const VoltaMark(height: 64),
-                  const SizedBox(height: 16),
+                  SizedBox(height: android ? 12 : 16),
                   const Text(
                     'Uma pista. Seus amigos.\nConectem os celulares ao mesmo Wi-Fi.',
                     style: TextStyle(fontSize: 18, color: muted, height: 1.6),
                   ),
-                  const SizedBox(height: 40),
+                  SizedBox(height: android ? 20 : 40),
                   FilledButton(
                     autofocus: true,
                     onPressed: state.busy ? null : session.open,
-                    child: Text(state.busy ? 'Abrindo…' : 'Criar sala local'),
+                    child: Text(state.busy ? 'Abrindo…' : 'Começar'),
                   ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: state.busy ? null : session.local,
-                    child: const Text('Treinar com teclado'),
-                  ),
-                  TextButton(
-                    onPressed: session.toggleTvMode,
-                    child: Text(
-                      session.tvMode
-                          ? 'Sair do modo TV'
-                          : 'Modo TV · tela cheia',
+                  SizedBox(height: android ? 8 : 12),
+                  if (!android)
+                    TextButton(
+                      onPressed: state.busy ? null : session.local,
+                      child: const Text('Treinar com teclado'),
                     ),
+                  if (!android)
+                    TextButton(
+                      onPressed: session.toggleTvMode,
+                      child: Text(
+                        session.tvMode
+                            ? 'Sair do modo TV'
+                            : 'Modo TV · tela cheia',
+                      ),
+                    ),
+                  TextButton(
+                    onPressed: state.busy
+                        ? null
+                        : () => session.open(timeTrial: true),
+                    child: const Text('Tempo na pista'),
                   ),
                   TextButton(
                     onPressed: () => showRaceHistory(context),
@@ -194,9 +205,9 @@ class EntryScreen extends StatelessWidget {
                         style: const TextStyle(color: Colors.orangeAccent),
                       ),
                     ),
-                  const SizedBox(height: 40),
+                  SizedBox(height: android ? 16 : 40),
                   const Text(
-                    '1–6 pilotos · 2 voltas · sem internet',
+                    '1–6 pilotos · 2 voltas',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: muted),
                   ),

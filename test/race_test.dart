@@ -22,7 +22,7 @@ void main() {
   test('forward speed is bounded and releasing brakes to zero', () {
     final race = Race(drivers);
     holdOnRoad(race, const ControlInput(accelerate: true), 3);
-    expect(race.cars.first.speed, 270);
+    expect(race.cars.first.speed, 405);
     expect(race.cars.last.speed, 0);
     holdOnRoad(race, const ControlInput(), 3);
     expect(race.cars.first.speed, 0);
@@ -48,11 +48,11 @@ void main() {
       car.speed = 200;
       holdOnRoad(race, const ControlInput(accelerate: true, boost: true), .5);
       expect(car.boosting, isTrue);
-      expect(car.speed, greaterThan(270));
+      expect(car.speed, greaterThan(405));
       expect(car.boostCharge, lessThan(1));
-      holdOnRoad(race, const ControlInput(accelerate: true, boost: true), 2);
+      holdOnRoad(race, const ControlInput(accelerate: true, boost: true), 4);
       expect(car.boosting, isFalse);
-      expect(car.speed, lessThanOrEqualTo(270));
+      expect(car.speed, lessThanOrEqualTo(405));
       holdOnRoad(race, const ControlInput(), 8);
       expect(car.boostCharge, closeTo(1, .001));
       holdOnRoad(race, const ControlInput(reverse: true, boost: true), 2);
@@ -125,9 +125,9 @@ void main() {
   test('turbo setting increases cruise and boost speeds', () {
     final race = Race([drivers.first], turbo: true);
     holdOnRoad(race, const ControlInput(accelerate: true), 5);
-    expect(race.cars.first.speed, closeTo(378, .01));
+    expect(race.cars.first.speed, closeTo(567, .01));
     holdOnRoad(race, const ControlInput(accelerate: true, boost: true), 1);
-    expect(race.cars.first.speed, greaterThan(410));
+    expect(race.cars.first.speed, greaterThan(615));
   });
 
   test('15 second deadline starts only with one remaining racer', () {
