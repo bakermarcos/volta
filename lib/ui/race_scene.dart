@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_scene/scene.dart' as s;
 import 'package:vector_math/vector_math.dart' as v;
 
@@ -53,8 +55,14 @@ class _RaceSceneState extends State<RaceScene> {
     fovRadiansY: .78,
   );
   final _materials = <int, s.UnlitMaterial>{};
-  s.IcosphereGeometry? _smokeGeometry;
-  List<s.Node> _kartTemplates = const [];
+  s.Texture2D? _smokeTexture;
+  s.SpriteMaterial? _smokeMaterial;
+  s.Node? _helmet, _newKart;
+  Uint8List? _oobiPixels;
+  var _oobiSize = 0;
+  final _oobiTints = <int, s.Texture2D>{};
+  s.Geometry? _wheelGeometry;
+  s.UnlitMaterial? _wheelMaterial;
 
   @override
   void initState() {
@@ -69,6 +77,7 @@ class _RaceSceneState extends State<RaceScene> {
   void didUpdateWidget(RaceScene oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.race != widget.race && _scene != null) {
+      _dropKarts();
       _playerCameras.clear();
       _tick(Duration.zero, 0);
     }
@@ -105,12 +114,15 @@ class _RaceSceneState extends State<RaceScene> {
         vignetteIntensity: .16,
       );
       _buildIsland(scene);
-      _kartTemplates = [
-        await s.Node.fromGlbAsset(
-          'assets/karts/kart_low_poly.glb',
-          maxTextureSize: 512,
-        ),
-      ];
+      _helmet = await s.Node.fromGlbAsset(
+        'assets/karts/kart_low_poly.glb',
+        maxTextureSize: 512,
+      );
+      _newKart = await s.Node.fromGlbAsset(
+        'assets/karts/kart-oobi.glb',
+        maxTextureSize: 512,
+      );
+      await _loadOobiAtlas();
       _tick(Duration.zero, 0);
       setState(() {});
     } catch (error) {
@@ -333,7 +345,7 @@ class _RaceSceneState extends State<RaceScene> {
         height: .3,
         radialSegments: 64,
       ),
-      0xFF4AD15C,
+      0xFF86B072,
       0,
       -.55,
       0,
@@ -341,7 +353,7 @@ class _RaceSceneState extends State<RaceScene> {
     );
     grass.scale = island.scale;
     final half = _circuit.width / 2;
-    _road(-half, half, 0, 0xFF4E5668);
+    _road(-half, half, 0, 0xFF3E4552);
     _road(-half, -half + 2.5, .35, 0xFF0C0E12);
     _road(half - 2.5, half, .35, 0xFF0C0E12);
     _road(-half - 5, -half, 0, 0xFFFF4D68, striped: true);
@@ -529,56 +541,110 @@ class _RaceSceneState extends State<RaceScene> {
     }
   }
 
-  v.Vector4 _inkTint(Color color, [double amount = .92]) {
-    final mixed = Color.lerp(const Color(0xFF1A1A1A), color, amount)!;
-    double linear(double channel) => channel <= .04045
-        ? channel / 12.92
-        : math.pow((channel + .055) / 1.055, 2.4).toDouble();
-    return v.Vector4(linear(mixed.r), linear(mixed.g), linear(mixed.b), 1);
-  }
-
-  void _paintKart(s.Node node, Color tint) {
-    node.shadowCastingMode = s.ShadowCastingMode.off;
-    node.frustumCulled = false;
-    const body = {'Carenagem dianteira', 'Lateral E', 'Lateral D', 'Aerofolio'};
-    final mesh = node.mesh;
-    if (mesh != null &&
-        (body.contains(node.name) ||
-            node.name == 'Capacete' ||
-            node.name == 'Faixa central')) {
-      final color = node.name == 'Faixa central'
-          ? Color.lerp(tint, const Color(0xFFFFF4D2), .5)!
-          : tint;
-      final amount = node.name == 'Capacete' ? .98 : .9;
-      for (final primitive in mesh.primitives) {
-        primitive.material = s.PhysicallyBasedMaterial()
-          ..baseColorFactor = _inkTint(color, amount)
-          ..roughnessFactor = .45
-          ..metallicFactor = 0
-          ..alphaMode = s.AlphaMode.opaque;
+  s.Geometry _classicWheel() {
+    final cached = _wheelGeometry;
+    if (cached != null) return cached;
+    final positions = <double>[], colors = <double>[];
+    void triangle(v.Vector3 a, v.Vector3 b, v.Vector3 c, double shade) {
+      for (final p in [a, b, c]) {
+        positions.addAll([p.x, p.y, p.z]);
+        colors.addAll([shade, shade, shade, 1]);
       }
     }
-    if (node.name == 'Volante') node.position = v.Vector3(0, .56, .18);
-    if (node.name == 'Coluna do volante') {
-      node.position = v.Vector3(0, .42, .08);
+
+    for (var i = 0; i < 24; i++) {
+      final a = i * math.pi / 12, b = (i + 1) * math.pi / 12;
+      v.Vector3 point(double angle, double radius, double y) =>
+          v.Vector3(math.cos(angle) * radius, y, math.sin(angle) * radius);
+      final lowA = point(a, .28, -.125), lowB = point(b, .28, -.125);
+      final highA = point(a, .28, .125), highB = point(b, .28, .125);
+      const tread = .025;
+      triangle(lowA, highA, lowB, tread);
+      triangle(lowB, highA, highB, tread);
+      for (final side in [-1.0, 1.0]) {
+        final y = side * .125;
+        final innerA = point(a, .1, y), innerB = point(b, .1, y);
+        final outerA = point(a, .28, y), outerB = point(b, .28, y);
+        void cap(v.Vector3 p, v.Vector3 q, v.Vector3 r, double shade) {
+          if (side > 0) {
+            triangle(p, r, q, shade);
+          } else {
+            triangle(p, q, r, shade);
+          }
+        }
+
+        cap(v.Vector3(0, y, 0), innerA, innerB, .4);
+        final spoke = i % 6 == 0 ? .32 : .025;
+        cap(innerA, outerA, innerB, spoke);
+        cap(innerB, outerA, outerB, spoke);
+      }
     }
-    if (node.name == 'Viseira') node.position = v.Vector3(0, .02, .2);
-    if (node.name == 'Brilho da viseira') {
-      node.position = v.Vector3(.05, .06, .23);
-      node.scale = v.Vector3(.7, .7, .5);
-    }
-    for (final child in node.children) {
-      _paintKart(child, tint);
-    }
+    return _wheelGeometry = s.MeshGeometry.fromArrays(
+      positions: Float32List.fromList(positions),
+      colors: Float32List.fromList(colors),
+      indices: List.generate(positions.length ~/ 3, (i) => i),
+    );
   }
 
   _Kart _kart(Car car) {
     final root = s.Node(name: 'kart-${car.driver.slot}')..frustumCulled = false;
     _scene!.add(root);
-    final tint = Color(car.driver.color);
-    final body = _kartTemplates.single.clone()..scale = v.Vector3.all(.98);
-    _paintKart(body, tint);
+    final body = s.Node()..frustumCulled = false;
     root.add(body);
+    final style = car.driver.model;
+    if (style == 2 && _newKart != null) {
+      return _characterKart(root, body, car.driver.color);
+    }
+    if (style != 1 && _helmet != null) return _helmetKart(root, body, car);
+    final color = car.driver.color;
+    _box(0, .35, 0, 1.1, .35, 1.8, color, parent: body);
+    _box(0, .28, .95, 1.25, .2, .25, 0xFF263342, parent: body);
+    _box(0, .6, -.32, .6, .55, .65, 0xFF263342, parent: body);
+    _box(0, .55, .58, .78, .2, .65, color, parent: body);
+    _mesh(
+      s.SphereGeometry(radius: .29, segments: 12, rings: 8),
+      color,
+      0,
+      1.05,
+      -.15,
+      parent: body,
+    );
+    _box(0, 1.08, .105, .43, .14, .13, 0xFF263342, parent: body);
+    final material = _wheelMaterial ??= s.UnlitMaterial()
+      ..baseColorFactor = v.Vector4(1, 1, 1, 1)
+      ..vertexColorWeight = 1;
+    final wheels = [
+      for (final (x, z) in [(-.64, .58), (.64, .58), (-.64, -.6), (.64, -.6)])
+        s.Node(mesh: s.Mesh(_classicWheel(), material))
+          ..position = v.Vector3(x, .28, z)
+          ..frustumCulled = false,
+    ];
+    for (final wheel in wheels) {
+      body.add(wheel);
+    }
+    final flame = _mesh(
+      s.IcosphereGeometry(radius: .35, subdivisions: 1),
+      0xFFFFD061,
+      0,
+      .35,
+      -1.3,
+      parent: body,
+    )..visible = false;
+    final smoke = <_TireSmoke>[
+      for (final (index, side) in [-1.0, 1.0].indexed)
+        _smoke(
+          body,
+          side,
+          at: wheels[index + 2].position + v.Vector3(0, .04, 0),
+        ),
+    ];
+    return _Kart(root, body, wheels, [flame], smoke, style: 1);
+  }
+
+  _Kart _helmetKart(s.Node root, s.Node body, Car car) {
+    final mesh = _helmet!.clone()..scale = v.Vector3.all(.98);
+    _paintHelmet(mesh, car.driver.color);
+    body.add(mesh);
     final wheels = [
       for (final name in [
         'Roda Frente E',
@@ -586,105 +652,167 @@ class _RaceSceneState extends State<RaceScene> {
         'Roda Tras E',
         'Roda Tras D',
       ])
-        body.getChildByName(name)!,
+        mesh.getChildByName(name)!,
     ];
-    for (final (index, wheel) in wheels.indexed) {
-      for (final child in [...wheel.children]) {
-        child.visible = false;
+    final flame = _mesh(
+      s.IcosphereGeometry(radius: .35, subdivisions: 1),
+      0xFFFFD061,
+      0,
+      .4,
+      -1.15,
+      parent: mesh,
+    )..visible = false;
+    final smoke = <_TireSmoke>[
+      for (final (index, side) in [-1.0, 1.0].indexed)
+        _smoke(
+          mesh,
+          side,
+          at: wheels[index + 2].position + v.Vector3(0, .04, 0),
+        ),
+    ];
+    return _Kart(root, body, wheels, [flame], smoke, style: 0);
+  }
+
+  void _paintHelmet(s.Node node, int color) {
+    const names = {
+      'Carenagem dianteira',
+      'Lateral E',
+      'Lateral D',
+      'Aerofolio',
+      'Capacete',
+      'Cubo',
+    };
+    if (names.contains(node.name)) {
+      final factor = _linearColor(color);
+      final mesh = node.mesh;
+      if (mesh != null) {
+        for (final primitive in mesh.primitives) {
+          primitive.material = s.PhysicallyBasedMaterial()
+            ..baseColorFactor = factor
+            ..roughnessFactor = .55;
+        }
       }
-      _dressWheel(wheel, rear: index >= 2);
     }
-    final steer = body.getChildByName('Volante')!;
-    for (final side in [-.2, .2]) {
-      final pipe = _mesh(
-        s.CylinderGeometry(
-          topRadius: .04,
-          bottomRadius: .05,
-          height: .36,
-          radialSegments: 8,
-        ),
-        0xFF9AA6B5,
-        side,
-        .4,
-        -1.16,
-        parent: body,
-      );
-      pipe.rotation = v.Quaternion.axisAngle(v.Vector3(1, 0, 0), math.pi / 2);
-    }
-    final flames = <s.Node>[
-      for (final side in [-.2, .2]) _flame(body, side),
-    ];
-    final smoke = <s.Node>[
-      for (final side in [-.71, .71])
-        for (var i = 0; i < 3; i++) _smoke(body, side),
-    ];
-    return _Kart(root, body, wheels, steer, flames, smoke);
-  }
-
-  void _dressWheel(s.Node wheel, {required bool rear}) {
-    final radius = rear ? .33 : .27;
-    final width = rear ? .24 : .2;
-    s.Node band(double bandRadius, double bandWidth, int color) {
-      final node = _mesh(
-        s.CylinderGeometry(
-          topRadius: bandRadius,
-          bottomRadius: bandRadius,
-          height: bandWidth,
-          radialSegments: 24,
-        ),
-        color,
-        0,
-        0,
-        0,
-        parent: wheel,
-      );
-      node.rotation = v.Quaternion.axisAngle(v.Vector3(0, 0, 1), -math.pi / 2);
-      return node;
-    }
-
-    band(radius, width, 0xFF17191D);
-    band(radius * .86, width * .72, 0xFF2C3138);
-    band(radius * .62, width * .5, 0xFFD5DCE4);
-    band(radius * .18, width * .62, 0xFF8D97A3);
-    for (var i = 0; i < 5; i++) {
-      final arm = s.Node()
-        ..frustumCulled = false
-        ..rotation = v.Quaternion.axisAngle(
-          v.Vector3(1, 0, 0),
-          i * math.pi * 2 / 5,
-        );
-      wheel.add(arm);
-      _box(
-        0,
-        radius * .4,
-        0,
-        width * .22,
-        radius * .46,
-        radius * .07,
-        i == 0 ? 0xFFFFF6D8 : 0xFFB7C0C8,
-        parent: arm,
-      );
-    }
-    for (var i = 0; i < 12; i++) {
-      final angle = i * math.pi * 2 / 12;
-      final reach = radius - radius * .05;
-      final block = _box(
-        0,
-        math.cos(angle) * reach,
-        math.sin(angle) * reach,
-        width * .72,
-        radius * .1,
-        radius * .14,
-        i == 0 ? 0xFFF4F1E8 : 0xFF1A1E24,
-        parent: wheel,
-      );
-      block.rotation = v.Quaternion.axisAngle(v.Vector3(1, 0, 0), angle);
+    for (final child in node.children) {
+      _paintHelmet(child, color);
     }
   }
 
-  s.Node _flame(s.Node body, double side) {
+  v.Vector4 _linearColor(int color) {
+    final channels = Color(color);
+    double linear(double channel) => channel <= .04045
+        ? channel / 12.92
+        : math.pow((channel + .055) / 1.055, 2.4).toDouble();
+    return v.Vector4(
+      linear(channels.r),
+      linear(channels.g),
+      linear(channels.b),
+      1,
+    );
+  }
+
+  _Kart _characterKart(s.Node root, s.Node body, int color) {
+    final mesh = _newKart!.clone()..scale = v.Vector3.all(2.06 * .98 / 1.428);
+    _paintCharacter(mesh, color);
+    _plainKart(mesh);
+    body.add(mesh);
+    final wheels = [
+      for (final name in [
+        'wheel-front-left',
+        'wheel-front-right',
+        'wheel-back-left',
+        'wheel-back-right',
+      ])
+        mesh.getChildByName(name)!,
+    ];
+    final flames = [
+      for (final side in [-.2, .2])
+        _flame(mesh, side, at: v.Vector3(side * .7, .22, -.58)),
+    ];
+    final smoke = <_TireSmoke>[
+      for (final (index, side) in [-1.0, 1.0].indexed)
+        _smoke(
+          mesh,
+          side,
+          at: wheels[index + 2].position + v.Vector3(0, .04, 0),
+        ),
+    ];
+    return _Kart(root, body, wheels, flames, smoke, style: 2);
+  }
+
+  Future<void> _loadOobiAtlas() async {
+    final data = await rootBundle.load('assets/karts/kart-oobi.glb');
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
+    final view = ByteData.sublistView(bytes);
+    final jsonLen = view.getUint32(12, Endian.little);
+    final json =
+        jsonDecode(utf8.decode(bytes.sublist(20, 20 + jsonLen)))
+            as Map<String, dynamic>;
+    final bin = 20 + jsonLen + 8;
+    final image = (json['images'] as List).first as Map<String, dynamic>;
+    final bufferView =
+        (json['bufferViews'] as List)[image['bufferView'] as int]
+            as Map<String, dynamic>;
+    final start = bin + (bufferView['byteOffset'] as int? ?? 0);
+    final png = bytes.sublist(start, start + (bufferView['byteLength'] as int));
+    final frame = await (await ui.instantiateImageCodec(png)).getNextFrame();
+    final raw = await frame.image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    _oobiSize = frame.image.width;
+    _oobiPixels = raw!.buffer.asUint8List();
+    frame.image.dispose();
+  }
+
+  s.Texture2D _oobiTint(int color) => _oobiTints.putIfAbsent(color, () {
+    final out = Uint8List.fromList(_oobiPixels!);
+    final red = (color >> 16) & 255;
+    final green = (color >> 8) & 255;
+    final blue = color & 255;
+    const orange = 0.299 * 255 + 0.587 * 126 + 0.114 * 68;
+    for (var i = 0; i < out.length; i += 4) {
+      final r = out[i], g = out[i + 1], b = out[i + 2];
+      final maxChannel = math.max(r, math.max(g, b));
+      final minChannel = math.min(r, math.min(g, b));
+      if (maxChannel < 40 || maxChannel == minChannel) continue;
+      if ((maxChannel - minChannel) / maxChannel < .28) continue;
+      final scale =
+          (0.299 * r + 0.587 * g + 0.114 * b) / orange;
+      out[i] = (red * scale).round().clamp(0, 255);
+      out[i + 1] = (green * scale).round().clamp(0, 255);
+      out[i + 2] = (blue * scale).round().clamp(0, 255);
+    }
+    return s.Texture2D.fromPixels(out, _oobiSize, _oobiSize);
+  });
+
+  void _paintCharacter(s.Node node, int color) {
+    final mesh = node.mesh;
+    if (mesh != null && _oobiPixels != null) {
+      final tint = _oobiTint(color);
+      for (final primitive in mesh.primitives) {
+        primitive.material = s.PhysicallyBasedMaterial(baseColorTexture: tint)
+          ..metallicFactor = 0
+          ..roughnessFactor = .85
+          ..doubleSided = true;
+      }
+    }
+    for (final child in node.children) {
+      _paintCharacter(child, color);
+    }
+  }
+
+  void _plainKart(s.Node node) {
+    node.shadowCastingMode = s.ShadowCastingMode.off;
+    node.frustumCulled = false;
+    for (final child in node.children) {
+      _plainKart(child);
+    }
+  }
+
+  s.Node _flame(s.Node body, double side, {v.Vector3? at}) {
     final anchor = s.Node()
-      ..position = v.Vector3(side, .42, -1.34)
+      ..position = at ?? v.Vector3(side, .42, -1.34)
       ..visible = false
       ..frustumCulled = false;
     body.add(anchor);
@@ -710,24 +838,112 @@ class _RaceSceneState extends State<RaceScene> {
     return anchor;
   }
 
-  s.Node _smoke(s.Node body, double x) {
-    final geometry = _smokeGeometry ??= s.IcosphereGeometry(
-      radius: .22,
-      subdivisions: 1,
+  _TireSmoke _smoke(s.Node body, double side, {v.Vector3? at}) {
+    final texture = _smokeTexture ??= s.Texture2D.fromPixels(
+      _smokeSprite(),
+      48,
+      48,
+      content: s.TextureContent.data,
+      sampling: const s.TextureSampling(mipmaps: false),
     );
-    final node = s.Node(mesh: s.Mesh(geometry, _material(0xFFE6E1D8)))
-      ..position = v.Vector3(x, .2, -.8)
-      ..scale = v.Vector3.zero()
-      ..visible = false
-      ..frustumCulled = false
-      ..shadowCastingMode = s.ShadowCastingMode.off;
-    body.add(node);
-    return node;
+    final material = _smokeMaterial ??= s.SpriteMaterial(colorTexture: texture)
+      ..blendMode = s.SpriteBlendMode.alpha
+      ..softDepthFade = .08;
+    final trailShape = _TireSmokeShape();
+    final trail = _puffs(
+      shape: trailShape,
+      material: material,
+      side: side,
+      life: const s.UniformFloat(.5, .85),
+      size: const s.UniformFloat(.24, .42),
+      speed: const s.UniformFloat(.25, .6),
+      cap: 72,
+    );
+    final trailNode = s.Node()..frustumCulled = false;
+    trailNode.addComponent(trail);
+    _scene!.add(trailNode);
+    final keptTrail = trailNode;
+    final hug = _puffs(
+      shape: _TireSmokeShape()..spread = .24,
+      material: material,
+      side: side + 3,
+      life: const s.UniformFloat(.28, .48),
+      size: const s.UniformFloat(.16, .28),
+      speed: const s.UniformFloat(.18, .4),
+      cap: 28,
+    );
+    final hugNode = s.Node()
+      ..position = at ?? v.Vector3(side * .71, .22, -.72)
+      ..frustumCulled = false;
+    hugNode.addComponent(hug);
+    body.add(hugNode);
+    return _TireSmoke(trail, hug, trailShape, side, keptTrail);
+  }
+
+  void _dropKarts() {
+    for (final kart in _karts.values) {
+      for (final tire in kart.smoke) {
+        tire.trailNode.parent?.remove(tire.trailNode);
+      }
+      kart.root.parent?.remove(kart.root);
+    }
+    _karts.clear();
+  }
+
+  s.ParticleEmitterComponent _puffs({
+    required _TireSmokeShape shape,
+    required s.SpriteMaterial material,
+    required double side,
+    required s.FloatDistribution life,
+    required s.FloatDistribution size,
+    required s.FloatDistribution speed,
+    int cap = 64,
+  }) {
+    return s.ParticleEmitterComponent(
+      system: s.ParticleSystem(
+        maxParticles: cap,
+        shape: shape,
+        spawner: s.Spawner(),
+        modules: [
+          s.SizeOverLifeModule(
+            s.CurveFloat(
+              s.ParticleCurve([
+                const s.ParticleKeyframe(0, .75),
+                const s.ParticleKeyframe(.25, 1.05),
+                const s.ParticleKeyframe(1, 1.45),
+              ]),
+            ),
+          ),
+          s.ColorOverLifeModule(
+            s.GradientColor(
+              s.ColorGradient([
+                s.ColorStop(0, v.Vector4(.92, .91, .88, 0)),
+                s.ColorStop(.12, v.Vector4(.96, .95, .92, .48)),
+                s.ColorStop(.55, v.Vector4(.9, .89, .86, .16)),
+                s.ColorStop(1, v.Vector4(.82, .81, .78, 0)),
+              ]),
+            ),
+          ),
+          s.LinearDragModule(2.4),
+          s.TurbulenceModule(strength: .25, frequency: 1.4, seed: side.round()),
+          const s.RotationModule(),
+        ],
+        lifetime: life,
+        startSpeed: speed,
+        startSize: size,
+        startRotation: s.UniformFloat(0, math.pi * 2),
+        gravity: v.Vector3(0, .16, 0),
+        seed: side.round() + 11,
+      ),
+      material: material,
+    )..aspectRatio = 1.3;
   }
 
   void _tick(Duration elapsed, double dt) {
-    if (dt > 0) _presented = true;
-    widget.onAdvance?.call(dt);
+    if (dt > 0) {
+      _presented = true;
+      widget.onAdvance?.call(dt);
+    }
     final race = widget.race ?? _preview;
     final seconds = elapsed.inMicroseconds / 1000000;
     final slots = race.cars.map((c) => c.driver.slot).toSet();
@@ -753,15 +969,20 @@ class _RaceSceneState extends State<RaceScene> {
           : 0.0;
       if (!kart.pitch.isFinite) kart.pitch = 0;
       if (!kart.drift.isFinite) kart.drift = 0;
+      if (!kart.lean.isFinite) kart.lean = 0;
       if (!kart.puff.isFinite) kart.puff = 0;
       kart.pitch += (pitchTarget - kart.pitch) * blend;
       final driftTarget = speed.abs() > 70
           ? ((steer.abs() - .2) / .7).clamp(0.0, 1.0)
           : 0.0;
-      kart.drift = (kart.drift + (driftTarget - kart.drift) * driftBlend).clamp(
-        0.0,
+      final leanTarget = driftTarget * steer.sign;
+      final release = leanTarget.abs() < kart.lean.abs();
+      final leanBlend = 1 - math.exp(-step * (release ? 1.15 : 2.4));
+      kart.lean = (kart.lean + (leanTarget - kart.lean) * leanBlend).clamp(
+        -1.0,
         1.0,
       );
+      kart.drift = kart.lean.abs();
       kart.puff = (kart.puff + (kart.drift - kart.puff) * driftBlend).clamp(
         0.0,
         1.0,
@@ -774,12 +995,9 @@ class _RaceSceneState extends State<RaceScene> {
         v.Vector3(0, 1, 0),
         math.pi / 2 - heading,
       );
-      final slide = kart.drift * -steer.sign * .16;
+      final slide = kart.lean * -.16;
       final attitude =
-          v.Quaternion.axisAngle(
-            v.Vector3(0, 1, 0),
-            kart.drift * steer.sign * .22,
-          ) *
+          v.Quaternion.axisAngle(v.Vector3(0, 1, 0), kart.lean * .22) *
           v.Quaternion.axisAngle(
             v.Vector3(0, 0, 1),
             -.04 * steer * (speed / 405),
@@ -790,45 +1008,70 @@ class _RaceSceneState extends State<RaceScene> {
       final swung = attitude.rotated(v.Vector3(0, -axle, 0));
       final bounce =
           (.5 + .5 * math.sin(seconds * 18 + car.driver.slot)) * .008 * motion;
-      kart.body.position = v.Vector3(
-        slide + swung.x,
-        .045 + axle + swung.y + bounce,
-        swung.z,
-      );
+      kart.body.position = kart.style == 2
+          ? v.Vector3(slide + swung.x, .045 + axle + swung.y + bounce, swung.z)
+          : v.Vector3(slide, bounce, 0);
       kart.spin =
           (kart.spin + step * (speed / 20) / (.33 * .98)) % (math.pi * 2);
       for (final (index, wheel) in kart.wheels.indexed) {
         final front = index < 2;
-        final steerAngle = front ? steer * .35 : 0.0;
-        wheel.rotation =
-            v.Quaternion.axisAngle(v.Vector3(0, 1, 0), steerAngle) *
-            v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -kart.spin);
-      }
-      final smoking = kart.puff >= .08;
-      for (final (index, puff) in kart.smoke.indexed) {
-        if (!smoking) {
-          puff.visible = false;
-          puff.scale = v.Vector3.zero();
-          continue;
+        if (kart.style == 1) {
+          wheel.rotation =
+              v.Quaternion.axisAngle(
+                v.Vector3(0, 1, 0),
+                front ? steer * .3 : 0,
+              ) *
+              v.Quaternion.axisAngle(v.Vector3(0, 0, 1), math.pi / 2) *
+              v.Quaternion.axisAngle(v.Vector3(0, 1, 0), kart.spin);
+        } else {
+          final steerAngle = front ? steer * .55 : kart.lean * .2;
+          final camber = (front ? .05 : .12) * -kart.lean;
+          wheel.rotation =
+              v.Quaternion.axisAngle(v.Vector3(0, 1, 0), steerAngle) *
+              v.Quaternion.axisAngle(v.Vector3(0, 0, 1), camber) *
+              v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -kart.spin);
         }
-        final slot = index % 3;
-        final side = index < 3 ? -.71 : .71;
-        final life = (seconds * 1.35 + slot * .34) % 1.0;
-        final grow = math.sin(life * math.pi);
-        final size = grow * (.1 + .22 * life) * (.55 + kart.puff * .6);
-        puff.visible = grow > .08;
-        puff.scale = v.Vector3.all(size.isFinite ? size : 0);
-        puff.position = v.Vector3(side, .01 + life * .18, -.72 - life * .42);
+      }
+      final forward = kart.root.rotation.rotated(v.Vector3(0, 0, 1));
+      final right = kart.root.rotation.rotated(v.Vector3(1, 0, 0));
+      final pulling = !rate.isFinite || rate < 70
+          ? 0.0
+          : ((rate - 70) / 160).clamp(0.0, 1.0) *
+                (1 - (speed.abs() / 380).clamp(0.0, .8));
+      final launch = math.max(pulling, car.boosting ? .9 : 0.0);
+      final slip = kart.drift < .12
+          ? 0.0
+          : ((kart.drift - .12) / .88).clamp(0.0, 1.0);
+      for (final (index, tire) in kart.smoke.indexed) {
+        final at = kart.wheels[index + 2].globalTransform.getTranslation();
+        final outside = tire.side * -steer.sign;
+        final slide = -steer.sign * slip;
+        tire.shape.contact.setValues(
+          at.x + right.x * slide * .55,
+          height + .06,
+          at.z + right.z * slide * .55,
+        );
+        final here = (launch + slip * (outside > 0 ? 1.2 : .45)).clamp(
+          0.0,
+          1.3,
+        );
+        final thrown =
+            forward * -.4 + v.Vector3(0, .5, 0) + right * (slide * 2.2);
+        final length = thrown.length;
+        if (length > 1e-4) {
+          tire.shape.direction.setFrom(thrown / length);
+        }
+        final smoking = here > .08;
+        tire.trail.system.spawner.rate = smoking ? 14 + here * 36 : 0;
+        tire.hug.system.spawner.rate = smoking ? 6 + here * 16 : 0;
       }
       for (final (index, flame) in kart.flames.indexed) {
         flame.visible = car.boosting;
         if (!car.boosting) continue;
-        final thrust = .78 + .22 * math.sin(seconds * 46 + index * 1.4);
-        flame.scale = v.Vector3(1, 1, thrust);
+        flame.scale = kart.style != 2
+            ? v.Vector3(.8, .8, 2.2 + math.sin(seconds * 55) * .7)
+            : v.Vector3(1, 1, .78 + .22 * math.sin(seconds * 46 + index * 1.4));
       }
-      kart.steer.rotation =
-          v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -.7) *
-          v.Quaternion.axisAngle(v.Vector3(0, 0, 1), -steer * .8);
     }
     for (var i = 0; i < _clouds.length; i++) {
       _clouds[i].position = v.Vector3(
@@ -1044,10 +1287,19 @@ bool _finite3(v.Vector3 value) =>
     value.x.isFinite && value.y.isFinite && value.z.isFinite;
 
 class _Kart {
-  _Kart(this.root, this.body, this.wheels, this.steer, this.flames, this.smoke);
-  final s.Node root, body, steer;
-  final List<s.Node> wheels, flames, smoke;
-  double spin = 0, pitch = 0, drift = 0, puff = 0, lastSpeed = 0;
+  _Kart(
+    this.root,
+    this.body,
+    this.wheels,
+    this.flames,
+    this.smoke, {
+    required this.style,
+  });
+  final s.Node root, body;
+  final List<s.Node> wheels, flames;
+  final List<_TireSmoke> smoke;
+  final int style;
+  double spin = 0, pitch = 0, drift = 0, lean = 0, puff = 0, lastSpeed = 0;
 }
 
 List<Rect> playerViewports(int count) {
@@ -1503,4 +1755,54 @@ class _LoadBar extends CustomPainter {
 
   @override
   bool shouldRepaint(_LoadBar oldDelegate) => oldDelegate.travel != travel;
+}
+
+/// Soft radial puff. The edge is clear so the billboard quad never shows.
+Uint8List _smokeSprite() {
+  const n = 48;
+  final pixels = Uint8List(n * n * 4);
+  for (var y = 0; y < n; y++) {
+    for (var x = 0; x < n; x++) {
+      final u = (x + .5) / n * 2 - 1;
+      final v = (y + .5) / n * 2 - 1;
+      final disc = (1 - math.sqrt(u * u + v * v) / .92).clamp(0.0, 1.0);
+      final lobe =
+          (1 - math.sqrt((u - .16) * (u - .16) + (v + .08) * (v + .08)) / .55)
+              .clamp(0.0, 1.0);
+      final alpha = (disc * disc * .82 + lobe * lobe * .28).clamp(0.0, 1.0);
+      final i = (y * n + x) * 4;
+      pixels[i] = 255;
+      pixels[i + 1] = 250;
+      pixels[i + 2] = 242;
+      pixels[i + 3] = (alpha * 255).round();
+    }
+  }
+  return pixels;
+}
+
+class _TireSmoke {
+  _TireSmoke(this.trail, this.hug, this.shape, this.side, this.trailNode);
+  final s.ParticleEmitterComponent trail, hug;
+  final _TireSmokeShape shape;
+  final double side;
+  final s.Node trailNode;
+}
+
+/// Drops a puff in world space, at the tire, thrown back and up.
+class _TireSmokeShape extends s.EmitterShape {
+  final contact = v.Vector3.zero();
+  final direction = v.Vector3(0, .9, -.35)..normalize();
+  double spread = .1;
+
+  @override
+  void sample(s.ParticleStorage storage, int index) {
+    final disc = spread * math.sqrt(storage.randomFor(index, 20));
+    final angle = storage.randomFor(index, 21) * math.pi * 2;
+    storage.posX[index] = contact.x + disc * math.cos(angle);
+    storage.posY[index] = contact.y;
+    storage.posZ[index] = contact.z + disc * math.sin(angle);
+    storage.velX[index] = direction.x;
+    storage.velY[index] = direction.y;
+    storage.velZ[index] = direction.z;
+  }
 }

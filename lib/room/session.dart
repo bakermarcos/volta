@@ -75,10 +75,12 @@ class Session extends ChangeNotifier {
     try {
       final html = await rootBundle.loadString('assets/controller.html');
       final kart = await rootBundle.load('assets/karts/kart_low_poly.glb');
+      final character = await rootBundle.load('assets/karts/kart-oobi.glb');
       await ready;
       final service = RoomService(
         html,
         kartModel: kart.buffer.asUint8List(),
+        characterModel: character.buffer.asUint8List(),
         history: () => history.snapshot,
         httpsDirectory: Directory('${history.file.parent.path}/https'),
       );

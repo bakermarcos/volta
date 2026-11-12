@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../audio/race_audio.dart';
 import '../game/race.dart';
 import '../room/session.dart';
 import 'track.dart';
@@ -55,12 +56,19 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   bool _submitted = false;
   bool _paused = false;
   int _startMs = 0;
+  final _audio = RaceAudio();
+  bool _music = true;
+  bool _lastLap = false;
+  double _banner = 0;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     FocusManager.instance.addListener(_revealFocus);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusLobby());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusLobby();
+      if (mounted && _race == null) _audio.menu();
+    });
   }
 
   void _revealFocus() {
@@ -86,6 +94,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     _pauseRequestTimer?.cancel();
     _focus.dispose();
     _lobbyFocus.dispose();
+    _audio.dispose();
     super.dispose();
   }
 
@@ -121,6 +130,9 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     _startMs = DateTime.now().millisecondsSinceEpoch;
     _missingSince.clear();
     _keys.clear();
+    _lastLap = false;
+    _banner = 0;
+    _audio.race();
     _focus.requestFocus();
   }
 
@@ -141,6 +153,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
         _countdown = 0;
         _sceneLive = false;
       });
+      _audio.menu();
       return;
     }
     final race = _race;
@@ -156,6 +169,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       _intro = math.min(1, _intro + dt);
       if (_intro == 1) {
         _countdown = 3;
+        _audio.count(3);
         if (!session.local) SessionScope.read(context).start();
       }
       setState(() {});
@@ -173,6 +187,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       final previous = _countdown.ceil();
       _countdown = (_countdown - dt).clamp(0.0, 3.0);
       if (_countdown.ceil() != previous) {
+        _audio.count(_countdown.ceil());
         if (!session.local) {
           SessionScope.read(context).countdown(_countdown.ceil());
         }
@@ -225,6 +240,16 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     }
     final previousRemaining = race.finishingIn?.ceil();
     race.step(dt, inputs, hold: _countdown > 0);
+    _audio.drive(race, dt, hold: _countdown > 0);
+    if (_countdown == 0 && !_lastLap && race.lastLapStarted) {
+      _lastLap = true;
+      _banner = 4;
+      _audio.climax();
+      setState(() {});
+    } else if (_banner > 0) {
+      _banner = math.max(0, _banner - dt);
+      if (_banner == 0) setState(() {});
+    }
     if (_countdown > 0) return;
     if (race.finishingIn?.ceil() != previousRemaining) setState(() {});
     if (!session.local && race.elapsed - _telemetryAt >= .2) {
@@ -232,6 +257,8 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       SessionScope.read(context).telemetry(race);
     }
     if (race.finished && !_submitted) {
+      _banner = 0;
+      _audio.win();
       setState(() => _submitted = true);
       SessionScope.read(context).finish(race);
     }
@@ -274,6 +301,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     _paused = true;
     _pauseRequestTimer?.cancel();
     _pauseArmed = false;
+    _audio.pause();
     SessionScope.read(context).setPaused(true);
     _keys.clear();
     final leave = await showDialog<bool>(
@@ -283,7 +311,26 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       builder: (context) => AlertDialog(
         backgroundColor: ink.withValues(alpha: .5),
         title: const Text('Corrida pausada'),
-        content: const Text('Os carros estão parados. Pronto para continuar?'),
+        content: StatefulBuilder(
+          builder: (context, setDialog) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Os carros estão parados. Pronto para continuar?'),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Música'),
+                value: _music,
+                onChanged: (value) {
+                  _music = value;
+                  _audio.music = value;
+                  setDialog(() {});
+                },
+              ),
+            ],
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, true),
@@ -303,6 +350,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     if (leave == true) {
       await SessionScope.read(context).leave();
     } else {
+      _audio.resume();
       _focus.requestFocus();
     }
   }
@@ -348,12 +396,37 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                   ),
                   if (_sceneLive && (_intro < 1 || _countdown > 0))
                     Text(
-                      _intro < 1 ? 'Está pronto?' : '${_countdown.ceil()}',
+                      _intro < 1 ? 'Pronto' : '${_countdown.ceil()}',
                       style: TextStyle(
                         fontSize: _intro < 1 ? 36 : 96,
                         color: lime,
                         fontWeight: FontWeight.bold,
                         shadows: const [Shadow(color: ink, blurRadius: 12)],
+                      ),
+                    ),
+                  if (_sceneLive && _banner > 0 && _countdown == 0)
+                    Positioned(
+                      top: 20,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: ink.withValues(alpha: .72),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 5,
+                          ),
+                          child: Text(
+                            'ÚLTIMA VOLTA',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: lime,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   if (race.finished)
@@ -469,7 +542,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                               Padding(
                                 padding: const EdgeInsets.only(left: 136),
                                 child: Text(
-                                  '$_laps voltas${_turbo ? ' · Turbo' : ''}${_reversed ? ' · Inverso' : ''}${_mirrored ? ' · Espelhado' : ''}',
+                                  '$_laps voltas${_turbo ? ' · Turbo' : ''}${_reversed ? ' · Inverso' : ''}${_mirrored ? ' · Espelhado' : ''}${_music ? '' : ' · sem música'}',
                                   style: const TextStyle(
                                     fontSize: 20,
                                     color: muted,
@@ -688,6 +761,11 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
             localPlayers: session.state.localPlayers,
           ),
           local: session.state.local,
+          music: _music,
+          onMusic: (value) {
+            setState(() => _music = value);
+            _audio.music = value;
+          },
         ),
       ),
     );
@@ -864,6 +942,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                           (session.local ||
                               SessionScope.read(context).state.error == null)) {
                         setState(() => _race = null);
+                        _audio.menu();
                       }
                     },
               child: const Text('Voltar ao lobby  →'),
@@ -898,6 +977,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       _countdown = 3;
       _sceneLive = true;
     });
+    _audio.count(3);
     if (!session.state.local) session.replay();
   }
 
@@ -910,6 +990,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       _lastRace = _race;
       _race = null;
     });
+    _audio.menu();
     WidgetsBinding.instance.addPostFrameCallback((_) => _focusLobby());
   }
 
@@ -1027,9 +1108,16 @@ class _RaceSettings {
 }
 
 class _RaceSettingsScreen extends StatefulWidget {
-  const _RaceSettingsScreen({required this.initial, required this.local});
+  const _RaceSettingsScreen({
+    required this.initial,
+    required this.local,
+    required this.music,
+    required this.onMusic,
+  });
   final _RaceSettings initial;
   final bool local;
+  final bool music;
+  final ValueChanged<bool> onMusic;
 
   @override
   State<_RaceSettingsScreen> createState() => _RaceSettingsScreenState();
@@ -1041,6 +1129,7 @@ class _RaceSettingsScreenState extends State<_RaceSettingsScreen> {
   late bool turbo = widget.initial.turbo;
   late bool mirrored = widget.initial.mirrored;
   late bool reversed = widget.initial.reversed;
+  late bool music = widget.music;
 
   @override
   Widget build(BuildContext context) => _StopEdge(
@@ -1103,6 +1192,17 @@ class _RaceSettingsScreenState extends State<_RaceSettingsScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
+                    SwitchListTile(
+                      title: const Text('Música'),
+                      subtitle: const Text(
+                        'Desliga a trilha e mantém motor, drift e batidas. Música de MintoDog. Derrapagem de Tom Haigh (CC BY 3.0).',
+                      ),
+                      value: music,
+                      onChanged: (value) {
+                        setState(() => music = value);
+                        widget.onMusic(value);
+                      },
+                    ),
                     SwitchListTile(
                       title: const Text('Modo turbo'),
                       subtitle: const Text('Karts 40% mais rápidos'),

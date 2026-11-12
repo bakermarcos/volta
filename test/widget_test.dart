@@ -65,13 +65,13 @@ void main() {
       final before = tester.state(find.byType(RaceScene));
       await tester.tap(find.text('Largar  →'));
       await tester.pump();
-      expect(find.text('Está pronto?'), findsNothing);
+      expect(find.text('Pronto'), findsNothing);
       final opening = tester.widget<RaceScene>(find.byType(RaceScene));
       for (var i = 0; i < 10; i++) {
         opening.onAdvance!(.05);
       }
       await tester.pump();
-      expect(find.text('Está pronto?'), findsOneWidget);
+      expect(find.text('Pronto'), findsOneWidget);
       for (var i = 0; i < 10; i++) {
         opening.onAdvance!(.05);
       }
