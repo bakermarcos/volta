@@ -642,7 +642,8 @@ class _RaceSceneState extends State<RaceScene> {
   }
 
   _Kart _helmetKart(s.Node root, s.Node body, Car car) {
-    final mesh = _helmet!.clone()..scale = v.Vector3.all(.98);
+    final mesh = _helmet!.clone();
+    _faceTrack(mesh, .98);
     _paintHelmet(mesh, car.driver.color);
     body.add(mesh);
     final wheels = [
@@ -698,6 +699,12 @@ class _RaceSceneState extends State<RaceScene> {
     }
   }
 
+  // The glTF root is a Z mirror. Reading it back as rotation and scale turns
+  // that mirror into a half turn, so the nose points at the camera.
+  void _faceTrack(s.Node mesh, double scale) {
+    mesh.localTransform = v.Matrix4.diagonal3Values(scale, scale, scale);
+  }
+
   v.Vector4 _linearColor(int color) {
     final channels = Color(color);
     double linear(double channel) => channel <= .04045
@@ -712,7 +719,8 @@ class _RaceSceneState extends State<RaceScene> {
   }
 
   _Kart _characterKart(s.Node root, s.Node body, int color) {
-    final mesh = _newKart!.clone()..scale = v.Vector3.all(2.06 * .98 / 1.428);
+    final mesh = _newKart!.clone();
+    _faceTrack(mesh, 2.06 * .98 / 1.428);
     _paintCharacter(mesh, color);
     _plainKart(mesh);
     body.add(mesh);
