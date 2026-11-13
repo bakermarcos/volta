@@ -1,7 +1,7 @@
-# Segurança
+# Security
 
-O Volta roda na rede de casa. A sala não deve ser exposta na internet: não abra porta do roteador para o jogo.
+Volta runs on the home network. The room should not be exposed to the internet. Do not open a router port for the game.
 
-Se encontrar um problema de segurança no código, no controle ou na sala local, reporte em privado pelo GitHub. Não publique o endereço da sua TV, o IP da sua rede nem o código da sala.
+If you find a security problem in the code, the controller, or the local room, report it privately on GitHub. Do not publish your TV's address, your network IP, or the room code.
 
-Use **Security → Report a vulnerability** neste repositório: https://github.com/bakermarcos/volta/security/advisories/new
+Use **Security → Report a vulnerability** in this repository: https://github.com/bakermarcos/volta/security/advisories/new

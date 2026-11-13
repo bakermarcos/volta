@@ -60,6 +60,32 @@ void main() {
       expect(car.boostCharge, 1);
     },
   );
+  test('last lap starts after a completed lap, not on a one-lap grid', () {
+    final single = Race(drivers, totalLaps: 1);
+    expect(single.lastLapStarted, isFalse);
+    single.cars.first.lapTimes.add(12);
+    single.cars.first.finishedAt = 12;
+    expect(single.lastLapStarted, isFalse);
+    final two = Race(drivers, totalLaps: 2);
+    expect(two.lastLapStarted, isFalse);
+    two.cars.first.lapTimes.add(20);
+    expect(two.lastLapStarted, isTrue);
+  });
+  test('countdown hold revs in place and refuses boost', () {
+    final race = Race(drivers);
+    final car = race.cars.first;
+    final x = car.x, y = car.y;
+    for (var i = 0; i < 60; i++) {
+      race.step(.05, {
+        car.driver.id: const ControlInput(accelerate: true, boost: true),
+      }, hold: true);
+    }
+    expect(car.x, x);
+    expect(car.y, y);
+    expect(car.speed, greaterThan(40));
+    expect(car.boosting, isFalse);
+    expect(car.boostCharge, 1);
+  });
   void crossGate(Race race, Car car, {int? gateIndex, bool backwards = false}) {
     final gate = race.checkpoints[gateIndex ?? car.nextCheckpoint];
     final direction = backwards ? -1 : 1;
@@ -272,6 +298,44 @@ void main() {
     parked.step(0, {});
     expect(parked.cars.first.x, 500);
     expect(parked.cars.last.x, 548);
+  });
+  test('karts packed on the shoulder stay separated and stop jittering', () {
+    final race = Race(drivers);
+    final circuit = race.circuit;
+    const angle = 0.0;
+    final center = circuit.point(angle);
+    final heading = circuit.heading(angle);
+    final nx = -math.sin(heading), ny = math.cos(heading);
+    final limit = circuit.driveableHalfWidth - 24;
+    final a = race.cars.first, b = race.cars.last;
+    a.trackAngle = angle;
+    b.trackAngle = angle;
+    a.speed = 0;
+    b.speed = 0;
+    a.x = center.x + nx * (limit + 30);
+    a.y = center.y + ny * (limit + 30);
+    b.x = a.x + math.cos(heading) * 10;
+    b.y = a.y + math.sin(heading) * 10;
+    race.step(0, {});
+    race.step(0, {});
+    double apart(Car left, Car right) => math.sqrt(
+      math.pow(left.x - right.x, 2) + math.pow(left.y - right.y, 2),
+    );
+    expect(apart(a, b), greaterThan(47.9));
+    expect(
+      circuit.nearest(a.x, a.y, nearAngle: a.trackAngle).distance,
+      lessThanOrEqualTo(limit + .2),
+    );
+    expect(
+      circuit.nearest(b.x, b.y, nearAngle: b.trackAngle).distance,
+      lessThanOrEqualTo(limit + .2),
+    );
+    final ax = a.x, ay = a.y, bx = b.x, by = b.y;
+    race.step(0, {});
+    expect(a.x, closeTo(ax, .05));
+    expect(a.y, closeTo(ay, .05));
+    expect(b.x, closeTo(bx, .05));
+    expect(b.y, closeTo(by, .05));
   });
   test('circuit lookup is continuous at the lap seam', () {
     for (final angle in [-.001, .001, 1.2, 3.5, math.pi * 2 - .001]) {

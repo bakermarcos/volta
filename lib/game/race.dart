@@ -22,11 +22,31 @@ class Driver {
     this.slot, {
     this.connected = true,
     this.ready = false,
+    this.colorIndex,
+    this.model = 0,
   });
   final String id, name;
   final int slot;
   final bool connected, ready;
-  int get color => playerColors[slot % playerColors.length];
+  final int? colorIndex;
+  final int model;
+  int get color => playerColors[(colorIndex ?? slot) % playerColors.length];
+
+  Driver copyWith({
+    String? name,
+    bool? connected,
+    bool? ready,
+    int? colorIndex,
+    int? model,
+  }) => Driver(
+    id,
+    name ?? this.name,
+    slot,
+    connected: connected ?? this.connected,
+    ready: ready ?? this.ready,
+    colorIndex: colorIndex ?? this.colorIndex,
+    model: model ?? this.model,
+  );
 }
 
 class ControlInput {
@@ -111,7 +131,15 @@ class Race {
   double? finishDeadline;
   double? get finishingIn =>
       finishDeadline == null ? null : math.max(0, finishDeadline! - elapsed);
+  bool get lastLapStarted => cars.any(
+    (car) =>
+        !car.retired &&
+        car.finishedAt == null &&
+        car.laps > 0 &&
+        car.laps >= totalLaps - 1,
+  );
   double elapsed = 0;
+  int bumps = 0;
   bool get finished => cars.every((c) => c.finishedAt != null || c.retired);
   List<Car> get standings => [...cars]
     ..sort((a, b) {
@@ -128,10 +156,12 @@ class Race {
     bool hold = false,
   }) {
     if (finished) return;
+    bumps = 0;
     final dt = seconds.clamp(0.0, .05);
     if (!hold) elapsed += dt;
     final previous = [for (final car in cars) (x: car.x, y: car.y)];
-    for (final car in cars) {
+    final driven = [for (final car in cars) (x: car.x, y: car.y)];
+    for (final (index, car) in cars.indexed) {
       if (car.finishedAt != null || car.retired) {
         car.boosting = false;
         continue;
@@ -142,6 +172,7 @@ class Race {
       final onRoad = old.distance < circuit.width / 2;
       if (!input.boost) car._boostReady = true;
       car.boosting =
+          !hold &&
           input.boost &&
           car._boostReady &&
           input.accelerate &&
@@ -202,14 +233,17 @@ class Race {
         circuit.minY - circuit.width * 2,
         circuit.maxY + circuit.width * 2,
       );
+      driven[index] = (x: car.x, y: car.y);
     }
     if (hold) return;
     _resolveContacts();
-    for (var i = 0; i < cars.length; i++) {
-      final car = cars[i];
+    for (final car in cars) {
       if (car.finishedAt != null || car.retired) continue;
-      final sample = circuit.nearest(car.x, car.y, nearAngle: car.trackAngle);
-      car.trackAngle = sample.angle;
+      var sample = circuit.nearest(car.x, car.y, nearAngle: car.trackAngle);
+      if (sample.distance > circuit.driveableHalfWidth) {
+        sample = circuit.nearest(car.x, car.y);
+        car.trackAngle = sample.angle;
+      }
       final limit = circuit.driveableHalfWidth - 24;
       if (sample.distance > limit) {
         final center = circuit.point(sample.angle);
@@ -217,30 +251,31 @@ class Race {
         car.x = center.x + (car.x - center.x) * ratio;
         car.y = center.y + (car.y - center.y) * ratio;
       }
+    }
+    _resolveContacts();
+    _settleShoulder();
+    for (var i = 0; i < cars.length; i++) {
+      final car = cars[i];
+      if (car.finishedAt != null || car.retired) continue;
+      final sample = circuit.nearest(car.x, car.y, nearAngle: car.trackAngle);
+      car.trackAngle = sample.angle;
       final gate = checkpoints[car.nextCheckpoint];
-      final before =
-          (previous[i].x - gate.x) * gate.forwardX +
-          (previous[i].y - gate.y) * gate.forwardY;
-      final after =
-          (car.x - gate.x) * gate.forwardX + (car.y - gate.y) * gate.forwardY;
-      if (before <= 0 && after > 0) {
-        final fraction = (-before / (after - before)).clamp(0.0, 1.0);
-        final x = previous[i].x + (car.x - previous[i].x) * fraction - gate.x;
-        final y = previous[i].y + (car.y - previous[i].y) * fraction - gate.y;
-        if ((-x * gate.forwardY + y * gate.forwardX).abs() <=
-            circuit.driveableHalfWidth) {
-          if (car.nextCheckpoint == 0) {
-            final crossedAt = elapsed - dt + fraction * dt;
-            car.lapTimes.add(crossedAt - car._lapStartedAt);
-            car._lapStartedAt = crossedAt;
-            if (car.laps == totalLaps) {
-              car.finishedAt = crossedAt;
-              car.speed = 0;
-              car.boosting = false;
-            }
+      final drive = _cross(previous[i], driven[i], gate);
+      final fraction = drive ?? _cross(driven[i], (x: car.x, y: car.y), gate);
+      if (fraction != null) {
+        if (car.nextCheckpoint == 0) {
+          final crossedAt = drive == null
+              ? elapsed
+              : elapsed - dt + fraction * dt;
+          car.lapTimes.add(crossedAt - car._lapStartedAt);
+          car._lapStartedAt = crossedAt;
+          if (car.laps == totalLaps) {
+            car.finishedAt = crossedAt;
+            car.speed = 0;
+            car.boosting = false;
           }
-          car.nextCheckpoint = (car.nextCheckpoint + 1) % checkpointCount;
         }
+        car.nextCheckpoint = (car.nextCheckpoint + 1) % checkpointCount;
       }
       final segment =
           (car.nextCheckpoint + checkpointCount - 1) % checkpointCount;
@@ -272,8 +307,28 @@ class Race {
     }
   }
 
+  double? _cross(
+    ({double x, double y}) from,
+    ({double x, double y}) to,
+    Checkpoint gate,
+  ) {
+    final before =
+        (from.x - gate.x) * gate.forwardX + (from.y - gate.y) * gate.forwardY;
+    final after =
+        (to.x - gate.x) * gate.forwardX + (to.y - gate.y) * gate.forwardY;
+    if (before > 0 || after <= 0) return null;
+    final fraction = (-before / (after - before)).clamp(0.0, 1.0);
+    final x = from.x + (to.x - from.x) * fraction - gate.x;
+    final y = from.y + (to.y - from.y) * fraction - gate.y;
+    if ((-x * gate.forwardY + y * gate.forwardX).abs() >
+        circuit.driveableHalfWidth) {
+      return null;
+    }
+    return fraction;
+  }
+
   void _resolveContacts() {
-    for (var pass = 0; pass < 32; pass++) {
+    for (var pass = 0; pass < 64; pass++) {
       var touching = false;
       for (var i = 0; i < cars.length; i++) {
         for (var j = i + 1; j < cars.length; j++) {
@@ -307,6 +362,7 @@ class Race {
                   nx +
               (math.sin(a.heading) * a.speed - math.sin(b.heading) * b.speed) *
                   ny;
+          if (pass == 0 && closing > 90) bumps++;
           if (pass == 0 && closing > 20) {
             if (!aStopped) a.speed *= .98;
             if (!bStopped) b.speed *= .98;
@@ -314,6 +370,51 @@ class Race {
         }
       }
       if (!touching) break;
+    }
+  }
+
+  void _settleShoulder() {
+    const body = 48.0;
+    final limit = circuit.driveableHalfWidth - 24;
+    for (var pass = 0; pass < 8; pass++) {
+      var adjusted = false;
+      for (final car in cars) {
+        if (car.finishedAt != null || car.retired) continue;
+        var sample = circuit.nearest(car.x, car.y, nearAngle: car.trackAngle);
+        if (sample.distance > circuit.driveableHalfWidth) {
+          sample = circuit.nearest(car.x, car.y);
+          car.trackAngle = sample.angle;
+        }
+        if (sample.distance <= limit) continue;
+        final center = circuit.point(sample.angle);
+        final ratio = limit / sample.distance;
+        car.x = center.x + (car.x - center.x) * ratio;
+        car.y = center.y + (car.y - center.y) * ratio;
+        adjusted = true;
+        var rx = car.x - center.x, ry = car.y - center.y;
+        final radial = math.sqrt(rx * rx + ry * ry);
+        if (radial < .001) continue;
+        rx /= radial;
+        ry /= radial;
+        final tx = -ry, ty = rx;
+        for (final other in cars) {
+          if (identical(other, car)) continue;
+          var dx = car.x - other.x, dy = car.y - other.y;
+          var distance = math.sqrt(dx * dx + dy * dy);
+          if (distance >= body - .001) continue;
+          if (distance < .001) {
+            dx = tx;
+            dy = ty;
+            distance = 1;
+          }
+          final need = body - distance;
+          final side = dx * tx + dy * ty;
+          final sign = side >= 0 ? 1.0 : -1.0;
+          car.x += tx * sign * need;
+          car.y += ty * sign * need;
+        }
+      }
+      if (!adjusted) break;
     }
   }
 }

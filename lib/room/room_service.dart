@@ -37,12 +37,13 @@ class RoomService {
     this.history,
     this.httpsDirectory,
     this.kartModel = const [],
+    this.characterModel = const [],
   });
   final Directory? httpsDirectory;
   HttpServer? _secureServer;
   final Map<String, Object> Function()? history;
   final String controllerHtml;
-  final List<int> kartModel;
+  final List<int> kartModel, characterModel;
   final _changes = StreamController<RoomSnapshot>.broadcast();
   final _players = <String, Driver>{};
   final _sockets = <String, WebSocket>{};
@@ -154,6 +155,20 @@ class RoomService {
       await request.response.close();
       return;
     }
+    if (request.method == 'GET' && request.uri.path == '/$code/kart-oobi.glb') {
+      if (characterModel.isEmpty) {
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+        return;
+      }
+      request.response.headers.contentType = ContentType(
+        'model',
+        'gltf-binary',
+      );
+      request.response.add(characterModel);
+      await request.response.close();
+      return;
+    }
     if (request.method == 'GET' && request.uri.path == '/$code/kart.glb') {
       request.response.headers.contentType = ContentType(
         'model',
@@ -215,7 +230,11 @@ class RoomService {
               id = token;
               _sockets[id]?.close();
               final old = _players[id]!;
-              _players[id!] = Driver(id!, name, old.slot);
+              _players[id!] = old.copyWith(
+                name: name,
+                ready: false,
+                connected: true,
+              );
               _cancelCountdown();
             } else {
               if (status != 'lobby') {
@@ -241,6 +260,10 @@ class RoomService {
                 'type': 'welcome',
                 'token': id,
                 'color': _players[id]!.color,
+                'colorIndex':
+                    (_players[id]!.colorIndex ?? _players[id]!.slot) %
+                    playerColors.length,
+                'model': _players[id]!.model,
               }),
             );
             _publish();
@@ -250,11 +273,24 @@ class RoomService {
               status == 'lobby' &&
               decoded['ready'] is bool) {
             final player = _players[id]!;
-            _players[id!] = Driver(
-              player.id,
-              player.name,
-              player.slot,
-              ready: decoded['ready'] as bool,
+            _players[id!] = player.copyWith(ready: decoded['ready'] as bool);
+            _publish();
+            return;
+          }
+          if (decoded['type'] == 'look' && status == 'lobby') {
+            final color = decoded['color'];
+            final model = decoded['model'];
+            if (color is! int ||
+                color < 0 ||
+                color >= playerColors.length ||
+                model is! int ||
+                model < 0 ||
+                model > 2) {
+              return;
+            }
+            _players[id!] = _players[id]!.copyWith(
+              colorIndex: color,
+              model: model,
             );
             _publish();
             return;
@@ -322,7 +358,7 @@ class RoomService {
         _pauseRequests.remove(id);
         final old = _players[id];
         if (old != null) {
-          _players[id!] = Driver(old.id, old.name, old.slot, connected: false);
+          _players[id!] = old.copyWith(connected: false);
         }
         _cancelCountdown();
         _publish();
@@ -350,6 +386,11 @@ class RoomService {
           'reversed': reversed,
           'lastResult': _lastResults[entry.key],
           'ready': _players[entry.key]?.ready ?? false,
+          'colorIndex':
+              ((_players[entry.key]?.colorIndex ?? _players[entry.key]?.slot) ??
+                  0) %
+              playerColors.length,
+          'model': _players[entry.key]?.model ?? 0,
           'readyCount': _players.values
               .where((p) => p.connected && p.ready)
               .length,
@@ -383,7 +424,7 @@ class RoomService {
     this.mirrored = mirrored;
     this.reversed = reversed;
     for (final p in _players.values.toList()) {
-      _players[p.id] = Driver(p.id, p.name, p.slot, connected: p.connected);
+      _players[p.id] = p.copyWith(ready: false);
     }
     _publish();
   }
@@ -411,7 +452,7 @@ class RoomService {
     status = 'lobby';
     countdown = 0;
     for (final p in _players.values.toList()) {
-      _players[p.id] = Driver(p.id, p.name, p.slot, connected: p.connected);
+      _players[p.id] = p.copyWith(ready: false);
     }
   }
 
@@ -488,7 +529,7 @@ class RoomService {
     paused = false;
     _pauseRequests.clear();
     for (final p in _players.values.toList()) {
-      _players[p.id] = Driver(p.id, p.name, p.slot, connected: p.connected);
+      _players[p.id] = p.copyWith(ready: false);
     }
     _inputs.clear();
     _results.clear();
