@@ -551,17 +551,33 @@ class _RaceSceneState extends State<RaceScene> {
         colors.addAll([shade, shade, shade, 1]);
       }
     }
-    if (node.name == 'Volante') node.position = v.Vector3(0, .56, .18);
-    if (node.name == 'Coluna do volante') {
-      node.position = v.Vector3(0, .42, .08);
-    }
-    if (node.name == 'Viseira') node.position = v.Vector3(0, .02, .2);
-    if (node.name == 'Brilho da viseira') {
-      node.position = v.Vector3(.05, .06, .23);
-      node.scale = v.Vector3(.7, .7, .5);
-    }
-    for (final child in node.children) {
-      _paintKart(child, tint);
+
+    for (var i = 0; i < 24; i++) {
+      final a = i * math.pi / 12, b = (i + 1) * math.pi / 12;
+      v.Vector3 point(double angle, double radius, double y) =>
+          v.Vector3(math.cos(angle) * radius, y, math.sin(angle) * radius);
+      final lowA = point(a, .28, -.125), lowB = point(b, .28, -.125);
+      final highA = point(a, .28, .125), highB = point(b, .28, .125);
+      const tread = .025;
+      triangle(lowA, highA, lowB, tread);
+      triangle(lowB, highA, highB, tread);
+      for (final side in [-1.0, 1.0]) {
+        final y = side * .125;
+        final innerA = point(a, .1, y), innerB = point(b, .1, y);
+        final outerA = point(a, .28, y), outerB = point(b, .28, y);
+        void cap(v.Vector3 p, v.Vector3 q, v.Vector3 r, double shade) {
+          if (side > 0) {
+            triangle(p, r, q, shade);
+          } else {
+            triangle(p, q, r, shade);
+          }
+        }
+
+        cap(v.Vector3(0, y, 0), innerA, innerB, .4);
+        final spoke = i % 6 == 0 ? .32 : .025;
+        cap(innerA, outerA, innerB, spoke);
+        cap(innerB, outerA, outerB, spoke);
+      }
     }
     return _wheelGeometry = s.MeshGeometry.fromArrays(
       positions: Float32List.fromList(positions),
