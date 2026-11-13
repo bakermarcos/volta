@@ -9,6 +9,7 @@ dependencies:
     sdk: flutter
   flutter_scene: 0.24.3
   hooks: ^2.2.0
+  audioplayers: ^6.5.0
   qr: ^4.0.1
   vector_math: ^2.4.4
 dev_dependencies:
@@ -21,6 +22,7 @@ flutter:
     - assets/controller.html
     - assets/volta_logo.png
     - assets/karts/
+    - assets/audio/
     - flutter_scene_generated/
     - path: flutter_scene_generated/metal_ios/
       platforms:

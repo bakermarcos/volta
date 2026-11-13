@@ -1,23 +1,23 @@
-# Volta na Google TV
+# Volta on Google TV
 
-## Agora: jogo no Mac, imagem na TV
+## Now: the game on the Mac, the picture on the TV
 
-- [ ] Ligar o Mac à TV por HDMI (adaptador USB-C/HDMI, se necessário).
-- [ ] Selecionar a entrada HDMI na Google TV e colocar a imagem em modo Jogo, se disponível.
-- [ ] Começar em 1920 × 1080 a 60 Hz. Validar seis jogadores antes de aumentar para 4K; 4K tem quatro vezes mais pixels.
-- [ ] Usar a TV como tela do jogo: mover a janela do Volta para ela e ativar **Modo TV · tela cheia**. O modo usa a tela em que a janela estiver.
-- [ ] Conferir que nomes, posição e voltas aparecem inteiros nas bordas. O HUD tem recuo de 5%; a corrida ocupa a tela, sem o cabeçalho do lobby.
-- [ ] Conectar Mac e celulares à mesma rede local, sem isolamento de convidados. A TV precisa apenas receber a imagem HDMI; não hospeda a sala.
-- [ ] Abrir uma nova sala e escanear seu QR. Recarregar a página do controle nos celulares para receber o layout novo.
-- [ ] Testar com dois, quatro e seis celulares: esquerda/direita, direção suave, aceleração → turbo sem levantar o dedo, freio/ré, desconexão e retorno.
-- [ ] Conferir a leitura a 2–3 metros e a fluidez com seis vistas. Os testes automatizados não substituem essa rodada no Wi-Fi real.
-- [ ] Usar **Pausar** ou Esc para parar a corrida; confirmar que o histórico continua sendo salvo no Mac.
+- [ ] Connect the Mac to the TV over HDMI (a USB-C/HDMI adapter if needed).
+- [ ] Select the HDMI input on the Google TV and set the picture to Game mode, if it exists.
+- [ ] Start at 1920 × 1080 at 60 Hz. Check six players before going to 4K. 4K is four times the pixels.
+- [ ] Use the TV as the game display: move the Volta window onto it and turn on **Modo TV · tela cheia**. The mode uses the screen the window is on.
+- [ ] Check that names, place, and laps are fully visible at the edges. The HUD is inset by 5%. The race fills the screen, without the lobby header.
+- [ ] Put the Mac and the phones on the same local network, with no guest isolation. The TV only has to receive the HDMI picture. It does not host the room.
+- [ ] Open a new room and scan its QR. Reload the controller page on the phones to get the new layout.
+- [ ] Test with two, four, and six phones: left/right, smooth steering, accelerate into boost without lifting the finger, brake/reverse, disconnect, and return.
+- [ ] Check readability at 2–3 meters and smoothness with six views. Automated tests do not replace that round on real Wi-Fi.
+- [ ] Use **Pausar** or Esc to stop the race, and confirm history is still saved on the Mac.
 
-O controle remoto da Google TV seleciona a entrada e configura a TV. Ele não controla automaticamente os menus do app no Mac. Por enquanto o lobby usa mouse/teclado; os pilotos usam os celulares.
+The Google TV remote selects the input and configures the TV. It does not drive the Mac app's menus. For now the lobby uses mouse and keyboard. The drivers use their phones.
 
-## App instalado na TV
+## App installed on the TV
 
-O APK release existe e pode ser o aparelho do jogo. Ele serve o controle na rede local e navega com o controle remoto.
+The release APK exists and can be the game device. It serves the controller on the local network and navigates with the remote.
 
 ```sh
 flutter build apk --release
@@ -25,17 +25,17 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 adb shell am start -n com.homegame.volta/.MainActivity
 ```
 
-Ainda falta medir fluidez com seis câmeras, validar a rodada presencial e, se for publicar, preparar a assinatura e os requisitos da Play Store.
+Smoothness with six cameras is still unmeasured, the in-person round is still open, and publishing would still need signing and the Play Store requirements.
 
-## Inclinação do celular
+## Phone tilt
 
-O controle inclui detecção, permissão e calibração de inclinação quando o navegador permite sensores. No endereço atual `http://IP-DO-MAC:porta/...`, os navegadores modernos normalmente bloqueiam o sensor por não ser um contexto seguro. A página mantém o toque e explica a limitação. O HTTPS local agora pode ser preparado com `tool/setup_https.sh`. No iPhone, abra o link de preparação no controle e instale/confie no certificado público, depois use o link HTTPS. Veja o passo a passo no README. A instalação e a confiança no iPhone são manuais; o toque continua disponível sem esse preparo.
+The controller detects, asks permission for, and calibrates tilt when the browser allows sensors. At the current address `http://IP-DO-MAC:port/...`, modern browsers usually block the sensor because it is not a secure context. The page keeps touch and explains the limit. Local HTTPS can be prepared with `tool/setup_https.sh`. On the iPhone, open the setup link in the controller, install and trust the public certificate, then use the HTTPS link. The steps are in the README. Installing and trusting on the iPhone is manual. Touch still works without that setup.
 
-## Referências verificadas
+## Checked references
 
-- [Google: layouts de TV, leitura à distância e margem segura](https://developer.android.com/training/tv/playback/compose/layouts)
-- [Google: criar um app para Android TV](https://developer.android.com/training/tv/get-started/create)
-- [Google: controles de TV e navegação por direcional](https://developer.android.com/training/tv/get-started/controllers)
-- [Apple: alcance dos polegares, controles grandes e combinação de ações](https://developer.apple.com/design/human-interface-guidelines/game-controls)
-- [Flutter Scene: plataformas e ativação da GPU](https://pub.dev/packages/flutter_scene)
-- [MDN: permissão de orientação e exigência de contexto seguro](https://developer.mozilla.org/en-US/docs/Web/API/DeviceOrientationEvent/requestPermission_static)
+- [Google: TV layouts, distance reading, and safe margin](https://developer.android.com/training/tv/playback/compose/layouts)
+- [Google: create an Android TV app](https://developer.android.com/training/tv/get-started/create)
+- [Google: TV controls and directional navigation](https://developer.android.com/training/tv/get-started/controllers)
+- [Apple: thumb reach, large controls, and combined actions](https://developer.apple.com/design/human-interface-guidelines/game-controls)
+- [Flutter Scene: platforms and GPU enablement](https://pub.dev/packages/flutter_scene)
+- [MDN: orientation permission and the secure-context requirement](https://developer.mozilla.org/en-US/docs/Web/API/DeviceOrientationEvent/requestPermission_static)

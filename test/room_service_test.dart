@@ -216,6 +216,34 @@ void main() {
       expect(snapshot.inputs[drivers[i].token]!['steer'], i % 3 - 1);
     }
   });
+  test('look sticks to the driver and survives reconnect', () async {
+    final a = await join('A');
+    final seen = room.changes.firstWhere(
+      (s) => s.players.any(
+        (p) => p.id == a.token && p.colorIndex == 3 && p.model == 2,
+      ),
+    );
+    a.send({'type': 'look', 'color': 3, 'model': 2});
+    await seen.timeout(const Duration(seconds: 3));
+    a.send({'type': 'look', 'color': 9, 'model': 4});
+    a.send({'type': 'ping'});
+    await a.next('pong');
+    expect(room.snapshot.players.single.colorIndex, 3);
+    expect(room.snapshot.players.single.model, 2);
+    final gone = room.changes.firstWhere(
+      (s) => s.players.any((p) => p.id == a.token && !p.connected),
+    );
+    await a.socket.close();
+    await gone.timeout(const Duration(seconds: 3));
+    final back = await join('A', token: a.token);
+    final driver = room.snapshot.players.singleWhere((p) => p.id == back.token);
+    expect(driver.connected, isTrue);
+    expect(driver.colorIndex, 3);
+    expect(driver.model, 2);
+    final welcome = await back.next('state');
+    expect(welcome['model'], 2);
+    expect(welcome['colorIndex'], 3);
+  });
   test(
     'socket owns its input; disconnect clears it; token reconnects same car',
     () async {
@@ -306,11 +334,7 @@ void main() {
     final clock = Stopwatch()..start();
     for (var tick = 0; tick < 50; tick++) {
       for (final driver in drivers) {
-        driver.send({
-          'type': 'input',
-          'accelerate': true,
-          'steer': 0,
-        });
+        driver.send({'type': 'input', 'accelerate': true, 'steer': 0});
       }
     }
     await Future<void>.delayed(const Duration(milliseconds: 40));
