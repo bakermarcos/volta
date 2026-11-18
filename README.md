@@ -82,9 +82,9 @@ In Safari on the iPhone, open the HTTP controller and tap **Preparar inclinaçã
 
 From the pause panel, **Sair da corrida** returns to the lobby. An abandoned race does not enter history. Phones stay connected, and each driver confirms readiness again. The lobby reserves each selected color for one driver at a time.
 
-Purple pickups appear in three to twelve evenly spaced rows, depending on track length. They respawn eight seconds after collection and automatically refill boost, grant a speed burst, or briefly slow the nearest rival within range. Time trials keep their standard rules.
+Purple mystery boxes appear in two to four rows based on track length. Driving through a box replaces the held item without slowing the kart. The phone shows the item name and icon on a Use button. Keyboard players use **E** and **Enter**. Boxes respawn after ten race seconds. Time trials have no boxes.
 
-The Android TV build uses a lighter 3D preset. See the [v0.3 plan and platform rollout](docs/v0.3.md) for settings, frame logging, and the TV acceptance test.
+The Android TV build uses native display resolution and fades distant scenery into a short horizon. See the [v0.3 plan and platform rollout](docs/v0.3.md) for settings, frame logging, and the TV acceptance test.
 
 ## Measured performance
 

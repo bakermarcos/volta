@@ -101,3 +101,19 @@ test('ready, countdown, timers and a two-step pause are reflected in the control
  assert.equal(element('raceTime').textContent,'1:05.12');
  assert.equal(element('lapTime').textContent,'0:10.50');
 });
+
+test('held item shows an icon and sends a one-shot command',()=>{
+ const {element,messages,receive}=controller();
+ const telemetry={type:'telemetry',speed:0,lap:0,rank:1,charge:1};
+ receive({...telemetry,item:'Banana',itemIcon:'🍌'});
+ assert.equal(element('item').hidden,false);
+ assert.equal(element('itemIcon').textContent,'🍌');
+ assert.equal(element('itemName').textContent,'Banana');
+ element('item').onclick();
+ assert.deepEqual(messages.at(-1),{type:'item'});
+ receive(telemetry);
+ assert.equal(element('item').hidden,true);
+ const count=messages.length;
+ element('item').onclick();
+ assert.equal(messages.length,count);
+});

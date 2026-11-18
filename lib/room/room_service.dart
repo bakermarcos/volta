@@ -47,6 +47,8 @@ class RoomService {
   final _changes = StreamController<RoomSnapshot>.broadcast();
   final _players = <String, Driver>{};
   final _sockets = <String, WebSocket>{};
+  final _itemRequests = <String>{};
+  bool takeItemRequest(String id) => _itemRequests.remove(id);
   final _inputs = <String, Map<String, Object>>{};
   final _results = <String, Map<String, Object>>{};
   final _random = Random.secure();
@@ -322,6 +324,7 @@ class RoomService {
           if (decoded['type'] == 'leave') {
             _players.remove(id);
             _inputs.remove(id);
+            _itemRequests.remove(id);
             _sockets.remove(id);
             _pauseRequests.remove(id);
             _cancelCountdown();
@@ -333,6 +336,10 @@ class RoomService {
             socket.add(
               jsonEncode({'type': 'pong', 'sentAt': decoded['sentAt']}),
             );
+            return;
+          }
+          if (decoded['type'] == 'item' && status == 'racing' && !paused) {
+            _itemRequests.add(id!);
             return;
           }
           if (decoded['type'] != 'input' || status != 'racing' || paused) {
@@ -367,6 +374,7 @@ class RoomService {
         if (id == null || _sockets[id] != socket) return;
         _sockets.remove(id);
         _inputs.remove(id);
+        _itemRequests.remove(id);
         _pauseRequests.remove(id);
         final old = _players[id];
         if (old != null) {
@@ -450,6 +458,7 @@ class RoomService {
     _pauseRequests.clear();
     _results.clear();
     _inputs.clear();
+    _itemRequests.clear();
     _publish();
     return true;
   }
@@ -475,6 +484,7 @@ class RoomService {
     paused = value;
     _pauseRequests.clear();
     _inputs.clear();
+    _itemRequests.clear();
     _publish();
   }
 
@@ -487,6 +497,8 @@ class RoomService {
           'speed': car.speed.round(),
           'charge': car.boostCharge,
           'boosting': car.boosting,
+          'item': car.item?.label,
+          'itemIcon': car.item?.icon,
           if (race.elapsed < car.powerNoticeUntil) 'power': car.powerNotice,
           'lap': car.laps,
           'totalLaps': race.totalLaps,
@@ -535,6 +547,7 @@ class RoomService {
     _pauseRequests.clear();
     _results.clear();
     _inputs.clear();
+    _itemRequests.clear();
     _publish();
   }
 
@@ -547,6 +560,7 @@ class RoomService {
       _players[p.id] = p.copyWith(ready: false);
     }
     _inputs.clear();
+    _itemRequests.clear();
     _results.clear();
     _publish();
   }

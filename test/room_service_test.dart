@@ -100,6 +100,23 @@ void main() {
     room.advanceCountdown(0);
   }
 
+  test('item requests are one shot and ignored while paused', () async {
+    final peer = await join('Ana');
+    await startReady();
+    for (var i = 0; i < 2; i++) {
+      peer.send({'type': 'item'});
+    }
+    peer.send({'type': 'ping'});
+    await peer.next('pong');
+    expect(room.takeItemRequest(peer.token!), isTrue);
+    expect(room.takeItemRequest(peer.token!), isFalse);
+    room.setPaused(true);
+    peer.send({'type': 'item'});
+    peer.send({'type': 'ping'});
+    await peer.next('pong');
+    expect(room.takeItemRequest(peer.token!), isFalse);
+  });
+
   test('colors are reserved across joins and race resets', () async {
     final a = await join('Ana');
     final chosen = room.changes.firstWhere(

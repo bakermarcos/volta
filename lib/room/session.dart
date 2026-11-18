@@ -186,6 +186,7 @@ class Session extends ChangeNotifier {
 
   void countdown(int value) => _service?.advanceCountdown(value);
   void setPaused(bool value) => _service?.setPaused(value);
+  bool takeItemRequest(String id) => _service?.takeItemRequest(id) ?? false;
   void telemetry(Race race) => _service?.telemetry(race);
   Future<void> finish(Race race) {
     if (!race.finished) return Future.value();

@@ -38,6 +38,13 @@ class VoltaApp extends StatefulWidget {
 
 class _VoltaAppState extends State<VoltaApp> {
   late final session = widget.session ?? Session();
+
+  @override
+  void initState() {
+    super.initState();
+    if (benchmarkRace) session.local(players: 4);
+  }
+
   @override
   void dispose() {
     session.dispose();

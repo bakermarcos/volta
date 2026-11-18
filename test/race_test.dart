@@ -5,45 +5,110 @@ import 'package:volta/game/race.dart';
 
 void main() {
   const drivers = [Driver('a', 'A', 0), Driver('b', 'B', 1)];
-  test('track pickups scale with length and grant three effects', () {
-    for (final outcome in [0, 1, 2]) {
-      final seed = Iterable<int>.generate(20)
-          .firstWhere((i) => math.Random(i).nextInt(3) == outcome);
+  test(
+    'mystery boxes scale with length and replace an unused item without impact',
+    () {
+      final seed = Iterable<int>.generate(1000)
+          .firstWhere((i) => math.Random(i).nextInt(100) < 4);
       final race = Race(drivers, random: math.Random(seed));
       final pickup = race.pickups[1];
-      final angle = math.pi / 2;
-      final heading = race.circuit.heading(angle);
-      final [car, rival] = race.cars;
-      car
+      final car = race.cars.first
         ..x = pickup.x
         ..y = pickup.y
-        ..trackAngle = angle
+        ..trackAngle = 2 * math.pi / 3
+        ..item = RaceItem.banana
         ..boostCharge = 0;
-      rival
-        ..x = pickup.x + math.cos(heading) * 100
-        ..y = pickup.y + math.sin(heading) * 100
-        ..trackAngle = car.trackAngle;
       race.step(.02, {}, hold: true);
       expect(pickup.availableAt, 0);
       race.step(.02, {});
-      expect(pickup.availableAt, closeTo(8.02, .001));
-      switch (outcome) {
-        case 0:
-          expect(car.boostCharge, 1);
-        case 1:
-          expect(rival.slowedUntil, closeTo(2.02, .001));
-        case 2:
-          expect(car.surgeUntil, closeTo(1.27, .001));
-      }
+      expect(car.item, RaceItem.swap);
+      expect(car.speed, 0);
+      expect(car.spinUntil, 0);
+      expect(race.hazards, isEmpty);
+      expect(pickup.availableAt, closeTo(10.02, .001));
       race.step(.02, {});
-      expect(pickup.availableAt, closeTo(8.02, .001));
+      expect(pickup.availableAt, closeTo(10.02, .001));
+      expect(Race(drivers, timeTrial: true).pickups, isEmpty);
+      final longTrack = Circuit.catalog.reduce(
+        (a, b) => a.length > b.length ? a : b,
+      );
+      expect(race.pickups, hasLength(6));
+      expect(Race(drivers, circuit: longTrack).pickups, hasLength(12));
+    },
+  );
+
+  test('comeback is reserved for last place and leader slow targets first', () {
+    final race = Race(drivers);
+    final [leader, last] = race.cars;
+    leader
+      ..progress = 1
+      ..item = RaceItem.comeback;
+    const use = ControlInput(useItem: true);
+    race.step(.02, {'a': use});
+    expect(leader.surgeUntil, 0);
+    expect(leader.item, RaceItem.comeback);
+    leader.progress = 1;
+    last.item = RaceItem.comeback;
+    race.step(.02, {'b': use});
+    expect(last.surgeUntil, closeTo(4.04, .001));
+    expect(last.item, isNull);
+    leader.progress = 1;
+    last.item = RaceItem.leader;
+    race.step(.02, {'b': use});
+    expect(leader.slowedUntil, closeTo(3.06, .001));
+  });
+
+  test('banana and oil hazards affect a rival only when contacted', () {
+    for (final item in [RaceItem.banana, RaceItem.oil]) {
+      final race = Race(drivers);
+      final [owner, rival] = race.cars;
+      owner.item = item;
+      race.step(.02, {'a': const ControlInput(useItem: true)});
+      final hazard = race.hazards.single;
+      rival
+        ..x = hazard.x
+        ..y = hazard.y
+        ..trackAngle = owner.trackAngle;
+      race.step(.02, {});
+      expect(owner.spinUntil, 0);
+      expect(owner.slowedUntil, 0);
+      expect(race.hazards, isEmpty);
+      if (item == RaceItem.banana) {
+        expect(rival.spinUntil, greaterThan(race.elapsed));
+      } else {
+        expect(rival.slowedUntil, greaterThan(race.elapsed));
+      }
     }
-    expect(Race(drivers, timeTrial: true).pickups, isEmpty);
-    final longTrack = Circuit.catalog.reduce(
-      (a, b) => a.length > b.length ? a : b,
-    );
-    expect(Race(drivers).pickups, hasLength(9));
-    expect(Race(drivers, circuit: longTrack).pickups, hasLength(36));
+  });
+
+  test('rocket hits a rival ahead and swap keeps each driver identity', () {
+    final race = Race(drivers);
+    final [owner, rival] = race.cars;
+    final point = race.circuit.point(0);
+    final ahead = race.circuit.point(.25);
+    owner
+      ..x = point.x
+      ..y = point.y
+      ..heading = math.atan2(ahead.y - point.y, ahead.x - point.x)
+      ..item = RaceItem.rocket;
+    rival
+      ..x = ahead.x
+      ..y = ahead.y
+      ..trackAngle = .25;
+    race.step(.02, {'a': const ControlInput(useItem: true)});
+    for (var i = 0; i < 20 && race.hazards.isNotEmpty; i++) {
+      race.step(.02, {});
+    }
+    expect(rival.spinUntil, greaterThan(race.elapsed));
+    expect(rival.speed, 0);
+    expect(owner.item, isNull);
+
+    final firstX = owner.x, secondX = rival.x;
+    owner.item = RaceItem.swap;
+    race.step(.02, {'a': const ControlInput(useItem: true)});
+    expect(owner.x, closeTo(secondX, .01));
+    expect(rival.x, closeTo(firstX, .01));
+    expect(owner.driver.id, 'a');
   });
 
   void holdOnRoad(Race race, ControlInput input, double seconds) {

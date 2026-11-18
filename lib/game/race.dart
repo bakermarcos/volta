@@ -58,9 +58,32 @@ class ControlInput {
     this.reverse = false,
     this.boost = false,
     this.steer = 0,
+    this.useItem = false,
   });
-  final bool accelerate, reverse, boost;
+  final bool accelerate, reverse, boost, useItem;
   final double steer;
+}
+
+enum RaceItem {
+  banana('Banana', '🍌'),
+  oil('Óleo', '🛢️'),
+  rocket('Foguete', '🚀'),
+  leader('Frear líder', '👑'),
+  comeback('Velocidade +50%', '⚡'),
+  swap('Trocar posição', '🔀'),
+  refill('Recarregar turbo', '🔋');
+
+  const RaceItem(this.label, this.icon);
+  final String label, icon;
+}
+
+class TrackHazard {
+  TrackHazard(this.item, this.owner, this.x, this.y, this.expires);
+  final RaceItem item;
+  final Car owner;
+  double x, y;
+  final double expires;
+  Car? target;
 }
 
 class PowerPickup {
@@ -84,7 +107,8 @@ class Car {
   final Driver driver;
   late double x, y, heading, progress, trackAngle;
   double speed = 0, boostCharge = 1, boostCooldown = 0, steering = 0;
-  double slowedUntil = 0, surgeUntil = 0, powerNoticeUntil = 0;
+  double slowedUntil = 0, surgeUntil = 0, spinUntil = 0, powerNoticeUntil = 0;
+  RaceItem? item;
   String? powerNotice;
   double? finishedAt;
   final lapTimes = <double>[];
@@ -118,7 +142,7 @@ class Race {
       for (var i = 0; i < checkpointCount; i++) _checkpoint(this.circuit, i),
     ];
     if (cars.length > 1 && !timeTrial) {
-      final rows = (this.circuit.length / 5500).round().clamp(3, 12);
+      final rows = (this.circuit.length / 14000).round().clamp(2, 4);
       for (var row = 1; row <= rows; row++) {
         final angle = row * 2 * math.pi / (rows + 1);
         final point = this.circuit.point(angle);
@@ -160,6 +184,7 @@ class Race {
   final List<Car> cars;
   final math.Random _random;
   final pickups = <PowerPickup>[];
+  final hazards = <TrackHazard>[];
   double? finishDeadline;
   double? get finishingIn =>
       finishDeadline == null ? null : math.max(0, finishDeadline! - elapsed);
@@ -190,7 +215,15 @@ class Race {
     if (finished) return;
     bumps = 0;
     final dt = seconds.clamp(0.0, .05);
-    if (!hold) elapsed += dt;
+    if (!hold) {
+      elapsed += dt;
+      if (inputs.values.any((input) => input.useItem)) {
+        final active = standings.where(_active).toList();
+        for (final car in active) {
+          if (inputs[car.driver.id]?.useItem == true) _useItem(car, active);
+        }
+      }
+    }
     final previous = [for (final car in cars) (x: car.x, y: car.y)];
     final driven = [for (final car in cars) (x: car.x, y: car.y)];
     for (final (index, car) in cars.indexed) {
@@ -198,11 +231,17 @@ class Race {
         car.boosting = false;
         continue;
       }
+      if (elapsed < car.spinUntil) {
+        car.boosting = false;
+        continue;
+      }
       final input = inputs[car.driver.id] ?? const ControlInput();
       final old = circuit.nearest(car.x, car.y, nearAngle: car.trackAngle);
-      final pace = (turbo ? 1.4 : 1.0) * (elapsed < car.slowedUntil ? .55 : 1);
+      final pace =
+          (turbo ? 1.4 : 1.0) *
+          (elapsed < car.slowedUntil ? .55 : 1) *
+          (elapsed < car.surgeUntil ? 1.5 : 1);
       final onRoad = old.distance < circuit.width / 2;
-      final surge = !hold && onRoad && elapsed < car.surgeUntil;
       if (!input.boost) car._boostReady = true;
       car.boosting =
           !hold &&
@@ -236,15 +275,13 @@ class Race {
             throttle *
             (braking
                 ? 300
-                : car.boosting || surge
+                : car.boosting
                 ? 555
                 : 247.5) *
             dt *
             pace;
       }
-      final maximum =
-          (onRoad ? (car.boosting ? 615.0 : (surge ? 540.0 : 405.0)) : 195.0) *
-          pace;
+      final maximum = (onRoad ? (car.boosting ? 615.0 : 405.0) : 195.0) * pace;
       if (car.speed > maximum) {
         car.speed = math.max(
           maximum,
@@ -289,6 +326,7 @@ class Race {
     }
     _resolveContacts();
     _settleShoulder();
+    _updateHazards(dt);
     _collectPower();
     for (var i = 0; i < cars.length; i++) {
       final car = cars[i];
@@ -363,50 +401,173 @@ class Race {
     return fraction;
   }
 
+  bool _active(Car car) => !car.retired && car.finishedAt == null;
+
+  void _notice(Car car, String message) {
+    car.powerNotice = message;
+    car.powerNoticeUntil = elapsed + 2;
+  }
+
   void _collectPower() {
-    for (final car in cars) {
-      if (car.finishedAt != null || car.retired) continue;
+    if (pickups.isEmpty) return;
+    for (final car in cars.where(_active)) {
       for (final pickup in pickups) {
-        if (elapsed < pickup.availableAt) continue;
-        final dx = car.x - pickup.x, dy = car.y - pickup.y;
-        if (dx * dx + dy * dy > 32 * 32) continue;
-        pickup.availableAt = elapsed + 8;
-        Car? target;
-        var nearest = 320 * 320.0;
-        final outcome = _random.nextInt(3);
-        if (outcome == 2) {
-          car.surgeUntil = elapsed + 1.25;
-          car.powerNotice = 'Impulso extra';
-          car.powerNoticeUntil = elapsed + 2;
-          break;
+        if (elapsed < pickup.availableAt ||
+            _distanceSquared(car.x, car.y, pickup.x, pickup.y) > 32 * 32) {
+          continue;
         }
-        if (outcome == 1) {
-          for (final rival in cars) {
-            if (rival == car || rival.retired || rival.finishedAt != null) {
-              continue;
-            }
-            final x = rival.x - car.x, y = rival.y - car.y;
-            final distance = x * x + y * y;
-            if (distance >= nearest) continue;
-            nearest = distance;
-            target = rival;
-          }
-        }
-        if (target == null) {
-          car.boostCharge = 1;
-          car.boostCooldown = 0;
-          car.powerNotice = 'Turbo recarregado';
+        pickup.availableAt = elapsed + 10;
+        if (_random.nextInt(100) < 4 && car.item != RaceItem.swap) {
+          car.item = RaceItem.swap;
         } else {
-          target.speed *= .65;
-          target.slowedUntil = elapsed + 2;
-          target.powerNotice = 'Onda recebida';
-          target.powerNoticeUntil = elapsed + 2;
-          car.powerNotice = 'Onda de lentidão';
+          final choices = RaceItem.values
+              .where((item) => item != car.item && item != RaceItem.swap)
+              .toList();
+          car.item = choices[_random.nextInt(choices.length)];
         }
-        car.powerNoticeUntil = elapsed + 2;
         break;
       }
     }
+  }
+
+  void _useItem(Car car, List<Car> active) {
+    final item = car.item;
+    if (item == null || elapsed < car.spinUntil) return;
+    switch (item) {
+      case RaceItem.banana:
+      case RaceItem.oil:
+        hazards.add(
+          TrackHazard(
+            item,
+            car,
+            car.x - math.cos(car.heading) * 40,
+            car.y - math.sin(car.heading) * 40,
+            elapsed + 15,
+          ),
+        );
+      case RaceItem.rocket:
+        Car? target;
+        var range = 500 * 500.0;
+        for (final rival in active) {
+          if (rival == car) continue;
+          final dx = rival.x - car.x, dy = rival.y - car.y;
+          final distance = dx * dx + dy * dy;
+          if (distance >= range ||
+              dx * math.cos(car.heading) + dy * math.sin(car.heading) <= 0) {
+            continue;
+          }
+          target = rival;
+          range = distance;
+        }
+        if (target == null) {
+          _notice(car, 'Sem alvo à frente');
+          return;
+        }
+        hazards.add(
+          TrackHazard(item, car, car.x, car.y, elapsed + 1.25)..target = target,
+        );
+      case RaceItem.leader:
+        if (active.length < 2 || active.first == car) {
+          _notice(car, 'Aguarde outro líder');
+          return;
+        }
+        _slow(active.first, 3, 'Líder desacelerado');
+      case RaceItem.comeback:
+        if (active.length < 2 || active.last != car) {
+          _notice(car, 'Só para o último lugar');
+          return;
+        }
+        car.surgeUntil = elapsed + 4;
+      case RaceItem.swap:
+        final rivals = active
+            .where((r) => r != car && r.laps == car.laps)
+            .toList();
+        if (rivals.isEmpty) {
+          _notice(car, 'Sem rival na mesma volta');
+          return;
+        }
+        final rival = rivals[_random.nextInt(rivals.length)];
+        final (x, y, heading, angle, progress, checkpoint) = (
+          car.x,
+          car.y,
+          car.heading,
+          car.trackAngle,
+          car.progress,
+          car.nextCheckpoint,
+        );
+        car
+          ..x = rival.x
+          ..y = rival.y
+          ..heading = rival.heading
+          ..trackAngle = rival.trackAngle
+          ..progress = rival.progress
+          ..nextCheckpoint = rival.nextCheckpoint;
+        rival
+          ..x = x
+          ..y = y
+          ..heading = heading
+          ..trackAngle = angle
+          ..progress = progress
+          ..nextCheckpoint = checkpoint;
+        _notice(rival, 'Posição trocada');
+      case RaceItem.refill:
+        car.boostCharge = 1;
+        car.boostCooldown = 0;
+    }
+    car.item = null;
+    _notice(car, item.label);
+  }
+
+  void _slow(Car car, double duration, String message) {
+    car.speed *= .55;
+    car.slowedUntil = math.max(car.slowedUntil, elapsed + duration);
+    _notice(car, message);
+  }
+
+  void _spin(Car car, double duration, String message) {
+    car.speed = 0;
+    car.spinUntil = elapsed + duration;
+    _notice(car, message);
+  }
+
+  void _updateHazards(double dt) {
+    hazards.removeWhere((hazard) {
+      if (elapsed >= hazard.expires) return true;
+      final target = hazard.target;
+      if (target != null) {
+        if (!_active(target)) return true;
+        final distance = math.sqrt(
+          _distanceSquared(hazard.x, hazard.y, target.x, target.y),
+        );
+        if (distance <= 22 + dt * 1000) {
+          _spin(target, .9, 'Atingido por foguete');
+          return true;
+        }
+        final step = dt * 1000 / distance;
+        hazard.x += (target.x - hazard.x) * step;
+        hazard.y += (target.y - hazard.y) * step;
+        return false;
+      }
+      for (final rival in cars) {
+        if (rival == hazard.owner ||
+            !_active(rival) ||
+            _distanceSquared(rival.x, rival.y, hazard.x, hazard.y) > 28 * 28) {
+          continue;
+        }
+        if (hazard.item == RaceItem.banana) {
+          _spin(rival, .6, 'Escorregou na banana');
+        } else {
+          _slow(rival, 1.6, 'Passou pelo óleo');
+        }
+        return true;
+      }
+      return false;
+    });
+  }
+
+  static double _distanceSquared(double x, double y, double a, double b) {
+    final dx = x - a, dy = y - b;
+    return dx * dx + dy * dy;
   }
 
   void _resolveContacts() {

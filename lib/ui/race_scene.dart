@@ -43,9 +43,12 @@ class _RaceSceneState extends State<RaceScene> {
   );
   double _hudElapsed = 0;
   final _clouds = <s.Node>[];
-  s.InstancedMesh? _pickupMesh;
+  s.InstancedMesh? _pickupMesh, _pickupMarks;
   final _pickupVisibility = <bool>[];
+  final _hazardNodes = <TrackHazard, s.Node>{};
   bool get _tvBudget => Platform.isAndroid;
+  bool get _boundedHorizon =>
+      _tvBudget && !const bool.fromEnvironment('VOLTA_FULL_DRAW');
   late final Race _preview;
   Circuit get _circuit => (widget.race ?? _preview).circuit;
   final _playerCameras = <String, s.PerspectiveCamera>{};
@@ -73,6 +76,9 @@ class _RaceSceneState extends State<RaceScene> {
     _preview = Race([
       for (var i = 0; i < maxPlayers; i++) Driver('preview-$i', 'Piloto', i),
     ], circuit: widget.circuit ?? Circuit.island);
+    if (const bool.fromEnvironment('VOLTA_BENCHMARK')) {
+      WidgetsBinding.instance.addTimingsCallback(_trackTimings);
+    }
     _load();
   }
 
@@ -82,7 +88,12 @@ class _RaceSceneState extends State<RaceScene> {
     if (oldWidget.race != widget.race && _scene != null) {
       _playerCameras.clear();
       _pickupMesh?.clearInstances();
+      _pickupMarks?.clearInstances();
       _pickupVisibility.clear();
+      for (final node in _hazardNodes.values) {
+        node.parent?.remove(node);
+      }
+      _hazardNodes.clear();
     }
   }
 
@@ -96,9 +107,7 @@ class _RaceSceneState extends State<RaceScene> {
       if (android) {
         scene.renderQuality
           ..tier = s.RenderQualityTier.low
-          ..adaptive = true
-          ..targetFrameRate = 30
-          ..minRenderScale = .65;
+          ..adaptive = false;
       }
       scene.directionalLight = s.DirectionalLight(
         direction: v.Vector3(-.5, -1, .3),
@@ -122,6 +131,11 @@ class _RaceSceneState extends State<RaceScene> {
         bloomScatter: .7,
         vignetteEnabled: !android,
         vignetteIntensity: .16,
+        fogEnabled: _boundedHorizon,
+        fogMode: s.FogMode.linear,
+        fogStart: 72,
+        fogEnd: 126,
+        fogColor: v.Vector3(.31, .66, .78),
       );
       _buildIsland(scene);
       _helmet = await s.Node.fromGlbAsset(
@@ -259,53 +273,66 @@ class _RaceSceneState extends State<RaceScene> {
     }
 
     final edges = [side(left), side(right)];
-    for (var i = 0; i < count; i++) {
-      final base = positions.length ~/ 3;
-      final c = Color(striped && (i ~/ 3).isEven ? 0xFFFDF2CF : color);
-      final next = (i + 1) % count;
-      for (final index in [i, next]) {
-        for (final edge in edges) {
-          positions.addAll([
-            edge[index].x / 20,
-            (_circuit.height(index * math.pi * 2 / count) + lift) / 20,
-            edge[index].y / 20,
-          ]);
-          colors.addAll([
-            math.pow(c.r, 2.2).toDouble(),
-            math.pow(c.g, 2.2).toDouble(),
-            math.pow(c.b, 2.2).toDouble(),
-            1,
-          ]);
-        }
-      }
-      indices.addAll([base, base + 1, base + 2, base + 1, base + 3, base + 2]);
-    }
-    final normals = Float32List(positions.length);
-    for (var i = 1; i < normals.length; i += 3) {
-      normals[i] = 1;
-    }
+    final sectionSize = _boundedHorizon && _circuit.length > 6000 ? 64 : count;
     final material = s.PhysicallyBasedMaterial()
       ..roughnessFactor = .95
       ..metallicFactor = 0
       ..vertexColorWeight = 1
       ..doubleSided = true
       ..depthLayer = striped ? (left < 0 ? 2 : 3) : 1;
-    final node = s.Node(
-      name: 'track-$left-$right',
-      mesh: s.Mesh(
-        s.MeshGeometry.fromArrays(
-          positions: Float32List.fromList(positions),
-          normals: normals,
-          colors: Float32List.fromList(colors),
-          indices: indices,
+    for (var first = 0; first < count; first += sectionSize) {
+      positions.clear();
+      colors.clear();
+      indices.clear();
+      for (var i = first; i < first + sectionSize; i++) {
+        final base = positions.length ~/ 3;
+        final c = Color(striped && (i ~/ 3).isEven ? 0xFFFDF2CF : color);
+        final next = (i + 1) % count;
+        for (final index in [i, next]) {
+          for (final edge in edges) {
+            positions.addAll([
+              edge[index].x / 20,
+              (_circuit.height(index * math.pi * 2 / count) + lift) / 20,
+              edge[index].y / 20,
+            ]);
+            colors.addAll([
+              math.pow(c.r, 2.2).toDouble(),
+              math.pow(c.g, 2.2).toDouble(),
+              math.pow(c.b, 2.2).toDouble(),
+              1,
+            ]);
+          }
+        }
+        indices.addAll([
+          base,
+          base + 1,
+          base + 2,
+          base + 1,
+          base + 3,
+          base + 2,
+        ]);
+      }
+      final normals = Float32List(positions.length);
+      for (var i = 1; i < normals.length; i += 3) {
+        normals[i] = 1;
+      }
+      final node = s.Node(
+        name: 'track-$left-$right-$first',
+        mesh: s.Mesh(
+          s.MeshGeometry.fromArrays(
+            positions: Float32List.fromList(positions),
+            normals: normals,
+            colors: Float32List.fromList(colors),
+            indices: indices,
+          ),
+          material,
         ),
-        material,
-      ),
-    );
-    node.shadowStatic = true;
-    node.shadowCastingMode = s.ShadowCastingMode.off;
-    node.frustumCulled = false;
-    _scene!.add(node);
+      );
+      node.shadowStatic = true;
+      node.shadowCastingMode = s.ShadowCastingMode.off;
+      node.frustumCulled = sectionSize != count;
+      _scene!.add(node);
+    }
   }
 
   void _buildIsland(s.Scene scene) {
@@ -1016,7 +1043,8 @@ class _RaceSceneState extends State<RaceScene> {
 
   void _updatePickups(Race race) {
     if (race.pickups.isEmpty) return;
-    final mesh = _pickupMesh ??= _addPickupMesh();
+    final mesh = _pickupMesh ??= _addPickupMesh(.85, .85, 0xFFCA67FF);
+    final marks = _pickupMarks ??= _addPickupMesh(.105, .012, 0xFFFFFFFF);
     var dirty = _pickupVisibility.length != race.pickups.length;
     if (dirty) {
       _pickupVisibility
@@ -1031,28 +1059,66 @@ class _RaceSceneState extends State<RaceScene> {
     }
     if (!dirty) return;
     mesh.clearInstances();
+    marks.clearInstances();
     for (final (i, pickup) in race.pickups.indexed) {
-      if (_pickupVisibility[i]) {
-        mesh.addInstance(
-          v.Matrix4.translationValues(pickup.x / 20, .6, pickup.y / 20),
+      if (!_pickupVisibility[i]) continue;
+      final x = pickup.x / 20, y = pickup.y / 20;
+      mesh.addInstance(v.Matrix4.translationValues(x, .6, y));
+      for (final (dx, dy) in const [
+        (-1, -2),
+        (0, -2),
+        (1, -2),
+        (1, -1),
+        (0, 0),
+        (0, 2),
+      ]) {
+        marks.addInstance(
+          v.Matrix4.translationValues(x + dx * .102, 1.03, y + dy * .102),
         );
       }
     }
   }
 
-  s.InstancedMesh _addPickupMesh() {
+  s.InstancedMesh _addPickupMesh(double width, double height, int color) {
     final mesh = s.InstancedMesh(
-      geometry: s.CuboidGeometry(v.Vector3.all(.85)),
-      material: _material(0xFFCA67FF),
+      geometry: s.CuboidGeometry(v.Vector3(width, height, width)),
+      material: _material(color),
       cullInstances: false,
     );
     _scene!.add(
-      s.Node(name: 'power-pickups')
+      s.Node(name: 'power-pickups-$color')
         ..frustumCulled = false
         ..shadowCastingMode = s.ShadowCastingMode.off
         ..addComponent(s.InstancedMeshComponent(mesh)),
     );
     return mesh;
+  }
+
+  void _updateHazards(Race race) {
+    if (_hazardNodes.isEmpty && race.hazards.isEmpty) return;
+    _hazardNodes.removeWhere((hazard, node) {
+      if (race.hazards.contains(hazard)) return false;
+      node.parent?.remove(node);
+      return true;
+    });
+    for (final hazard in race.hazards) {
+      final node = _hazardNodes.putIfAbsent(hazard, () {
+        final (width, height, depth, color) = switch (hazard.item) {
+          RaceItem.banana => (.67, .45, .5, 0xFFFFDD35),
+          RaceItem.oil => (1.7, .035, 1.4, 0xFF38284B),
+          _ => (.45, .45, .85, 0xFFFF5844),
+        };
+        return _box(0, 0, 0, width, height, depth, color)
+          ..shadowStatic = false
+          ..shadowCastingMode = s.ShadowCastingMode.off;
+      });
+      final height = switch (hazard.item) {
+        RaceItem.oil => .08,
+        RaceItem.rocket => .75,
+        _ => .26,
+      };
+      node.position = v.Vector3(hazard.x / 20, height, hazard.y / 20);
+    }
   }
 
   void _tick(Duration elapsed, double dt) {
@@ -1063,7 +1129,14 @@ class _RaceSceneState extends State<RaceScene> {
     final race = widget.race ?? _preview;
     final seconds = elapsed.inMicroseconds / 1000000;
     _updatePickups(race);
+    _updateHazards(race);
     const logFrames = bool.fromEnvironment('VOLTA_FRAME_STATS');
+    if (const bool.fromEnvironment('VOLTA_BENCHMARK') &&
+        widget.race != null &&
+        race.elapsed > 0 &&
+        dt > 0) {
+      _benchmarkFrame(dt);
+    }
     if (logFrames && widget.race != null && dt > 0) {
       _logFrame(dt, race.cars.length);
     }
@@ -1142,7 +1215,12 @@ class _RaceSceneState extends State<RaceScene> {
             -.04 * steer * (speed / 405),
           ) *
           v.Quaternion.axisAngle(v.Vector3(1, 0, 0), kart.pitch);
-      kart.body.rotation = attitude;
+      kart.body.rotation = race.elapsed < car.spinUntil
+          ? v.Quaternion.axisAngle(
+              v.Vector3(0, 1, 0),
+              (car.spinUntil - race.elapsed) * 14,
+            )
+          : attitude;
       const axle = .3;
       final swung = attitude.rotated(v.Vector3(0, -axle, 0));
       final bounce =
@@ -1262,6 +1340,7 @@ class _RaceSceneState extends State<RaceScene> {
           target: target.clone(),
           fovRadiansY: 1.0,
           fovNear: .2,
+          fovFar: _boundedHorizon ? 130 : 1000,
         ),
       );
       final follow =
@@ -1294,6 +1373,52 @@ class _RaceSceneState extends State<RaceScene> {
       _capturing = true;
       _capture(capture);
     }
+  }
+
+  final _benchmarkTimes = <double>[];
+  final _uiTimes = <double>[], _rasterTimes = <double>[];
+  final _rasterIntervals = <double>[];
+  int? _lastRasterFinish;
+  void _trackTimings(List<ui.FrameTiming> frames) {
+    if (_benchmarkElapsed < 5 || _benchmarkSample >= 60) return;
+    for (final frame in frames) {
+      final finish = frame.timestampInMicroseconds(ui.FramePhase.rasterFinish);
+      final previous = _lastRasterFinish;
+      if (previous != null && finish > previous) {
+        _rasterIntervals.add((finish - previous) / 1000);
+      }
+      _lastRasterFinish = finish;
+      _uiTimes.add(frame.buildDuration.inMicroseconds / 1000);
+      _rasterTimes.add(frame.rasterDuration.inMicroseconds / 1000);
+    }
+  }
+
+  double _p95(List<double> samples) {
+    if (samples.isEmpty) return 0;
+    samples.sort();
+    return samples[(samples.length * .95).ceil() - 1];
+  }
+
+  double _benchmarkElapsed = 0, _benchmarkSample = 0;
+  void _benchmarkFrame(double dt) {
+    if (_benchmarkSample >= 60) return;
+    _benchmarkElapsed += dt;
+    if (_benchmarkElapsed <= 5) return;
+    _benchmarkTimes.add(dt);
+    _benchmarkSample += dt;
+    if (_benchmarkSample < 60) return;
+    final rasterMs = _rasterIntervals.fold(0.0, (sum, value) => sum + value);
+    final rasterFps = rasterMs == 0
+        ? 0.0
+        : _rasterIntervals.length * 1000 / rasterMs;
+    final fps = math.min(_benchmarkTimes.length / _benchmarkSample, rasterFps);
+    final p95 = math.max(_p95(_benchmarkTimes) * 1000, _p95(_rasterIntervals));
+    debugPrint(
+      'VOLTA_BENCHMARK_RESULT fps=${fps.toStringAsFixed(2)} '
+      'p95_ms=${p95.toStringAsFixed(2)} views=4 '
+      'ui_p95_ms=${_p95(_uiTimes).toStringAsFixed(2)} '
+      'raster_p95_ms=${_p95(_rasterTimes).toStringAsFixed(2)}',
+    );
   }
 
   final _frameTimes = <double>[];
@@ -1395,6 +1520,9 @@ class _RaceSceneState extends State<RaceScene> {
 
   @override
   void dispose() {
+    if (const bool.fromEnvironment('VOLTA_BENCHMARK')) {
+      WidgetsBinding.instance.removeTimingsCallback(_trackTimings);
+    }
     _hud.disposeText();
     _overlay.dispose();
     _scene?.dispose();
@@ -1420,9 +1548,9 @@ class _RaceSceneState extends State<RaceScene> {
                 _scene!,
                 viewsBuilder: _views,
                 onTick: _tick,
-                maxFrameRate: _tvBudget || widget.race == null ? 30 : 60,
+                maxFrameRate: widget.race == null ? 30 : 60,
                 warmUp: true,
-                pixelRatio: _pixelRatio(context, constraints.biggest),
+                pixelRatio: _tvBudget ? View.of(context).devicePixelRatio : 1,
                 loadingBuilder: (context, _) => const _LoadingTrack(),
               ),
             ),
@@ -1435,15 +1563,6 @@ class _RaceSceneState extends State<RaceScene> {
         ),
       ),
     );
-  }
-
-  double _pixelRatio(BuildContext context, Size size) {
-    if (!Platform.isAndroid) return 1;
-    final longSide = math.max(size.width, size.height);
-    if (longSide <= 0 || !longSide.isFinite) return 1;
-    final native = View.of(context).devicePixelRatio;
-    final views = widget.race?.cars.length ?? 1;
-    return math.min(native, (views >= 3 ? 960 : 1280) / longSide);
   }
 }
 
@@ -1782,6 +1901,50 @@ class _PlayerHud extends CustomPainter {
         );
       }
       canvas.restore();
+      final held = car.item;
+      if (racing && held != null) {
+        final icon = switch (held) {
+          RaceItem.banana => Icons.restaurant_rounded,
+          RaceItem.oil => Icons.water_drop_rounded,
+          RaceItem.rocket => Icons.rocket_launch_rounded,
+          RaceItem.leader => Icons.emoji_events_rounded,
+          RaceItem.comeback => Icons.bolt_rounded,
+          RaceItem.swap => Icons.swap_horiz_rounded,
+          RaceItem.refill => Icons.battery_charging_full_rounded,
+        };
+        final heldBadge = rect.topRight + const Offset(-44, 18);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(heldBadge.dx, heldBadge.dy, 34, 34),
+            const Radius.circular(8),
+          ),
+          Paint()..color = const Color(0xFF392657),
+        );
+        if (held == RaceItem.banana) {
+          final x = heldBadge.dx, y = heldBadge.dy;
+          final banana = Path()
+            ..moveTo(x + 7, y + 7)
+            ..quadraticBezierTo(x + 10, y + 25, x + 27, y + 17)
+            ..quadraticBezierTo(x + 24, y + 33, x + 11, y + 25)
+            ..quadraticBezierTo(x + 4, y + 21, x + 7, y + 7)
+            ..close();
+          canvas.drawPath(banana, Paint()..color = const Color(0xFFFFD85B));
+        } else {
+          final glyph = TextPainter(
+            text: TextSpan(
+              text: String.fromCharCode(icon.codePoint),
+              style: TextStyle(
+                fontFamily: icon.fontFamily,
+                color: Colors.white,
+                fontSize: 24,
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout();
+          glyph.paint(canvas, heldBadge + const Offset(5, 5));
+          glyph.dispose();
+        }
+      }
       final notice = car.powerNotice;
       if (racing && notice != null && current.elapsed < car.powerNoticeUntil) {
         _text(

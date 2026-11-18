@@ -19,6 +19,8 @@ Route<T> _tvRoute<T>(WidgetBuilder builder) => PageRouteBuilder<T>(
   reverseTransitionDuration: Duration.zero,
 );
 
+const benchmarkRace = bool.fromEnvironment('VOLTA_BENCHMARK');
+
 class HostScreen extends StatefulWidget {
   const HostScreen({super.key});
   @override
@@ -28,6 +30,7 @@ class HostScreen extends StatefulWidget {
 class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   final _focus = FocusNode();
   final _lobbyFocus = FocusNode();
+  final _itemKeys = <LogicalKeyboardKey>{};
   final _keys = <LogicalKeyboardKey>{};
   final _missingSince = <String, double>{};
   Race? _race;
@@ -79,6 +82,15 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     FocusManager.instance.addListener(_revealFocus);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (benchmarkRace && mounted) {
+        setState(
+          () => _begin([
+            for (var i = 0; i < 4; i++)
+              Driver('bench-$i', 'Bot ${i + 1}', i, model: i % 3),
+          ]),
+        );
+        return;
+      }
       _focusLobby();
       if (mounted && _race == null) _audio.menu();
     });
@@ -115,6 +127,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) return;
     _keys.clear();
+    _itemKeys.clear();
     // inactive fires for a transient focus change and used to leave the
     // pause panel stranded on the home screen.
     if ((state == AppLifecycleState.paused ||
@@ -132,7 +145,8 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     _race = Race(
       drivers,
       circuit: _track,
-      totalLaps: _laps,
+      totalLaps: benchmarkRace ? 99 : _laps,
+      random: benchmarkRace ? math.Random(13) : null,
       turbo: _turbo,
       mirrored: _mirrored,
       reversed: _reversed,
@@ -146,6 +160,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     _startMs = DateTime.now().millisecondsSinceEpoch;
     _missingSince.clear();
     _keys.clear();
+    _itemKeys.clear();
     _lastLap = false;
     _banner = 0;
     _audio.race();
@@ -218,8 +233,23 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       }
     }
     final inputs = <String, ControlInput>{};
-    if (session.local) {
+    if (benchmarkRace) {
+      for (final car in race.cars) {
+        final angle = car.trackAngle + 120 / race.circuit.length * 2 * math.pi;
+        final target = race.circuit.point(angle);
+        final delta =
+            math.atan2(target.y - car.y, target.x - car.x) - car.heading;
+        final turn = math.atan2(math.sin(delta), math.cos(delta));
+        inputs[car.driver.id] = ControlInput(
+          accelerate: true,
+          boost: turn.abs() < .18,
+          steer: (-turn * 2).clamp(-1.0, 1.0),
+          useItem: true,
+        );
+      }
+    } else if (session.local) {
       inputs['local-1'] = ControlInput(
+        useItem: _itemKeys.remove(LogicalKeyboardKey.keyE),
         accelerate: _keys.contains(LogicalKeyboardKey.keyW),
         reverse: _keys.contains(LogicalKeyboardKey.keyS),
         boost: _keys.contains(LogicalKeyboardKey.shiftLeft),
@@ -228,6 +258,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
             (_keys.contains(LogicalKeyboardKey.keyA) ? 1 : 0),
       );
       inputs['local-2'] = ControlInput(
+        useItem: _itemKeys.remove(LogicalKeyboardKey.enter),
         accelerate: _keys.contains(LogicalKeyboardKey.arrowUp),
         reverse: _keys.contains(LogicalKeyboardKey.arrowDown),
         boost: _keys.contains(LogicalKeyboardKey.space),
@@ -251,8 +282,16 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
         _missingSince.remove(car.driver.id);
         final data = room.inputs[car.driver.id] ?? {};
         final updated = (data['updatedAt'] as num?)?.toInt() ?? 0;
-        if (updated < _startMs || now - updated > 1800) continue;
+        final useItem = SessionScope.read(context)
+            .takeItemRequest(car.driver.id);
+        if (updated < _startMs || now - updated > 1800) {
+          if (useItem) {
+            inputs[car.driver.id] = const ControlInput(useItem: true);
+          }
+          continue;
+        }
         inputs[car.driver.id] = ControlInput(
+          useItem: useItem,
           accelerate: data['accelerate'] == true,
           reverse: data['reverse'] == true,
           boost: data['boost'] == true,
@@ -294,7 +333,13 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       _requestPause();
       return;
     }
-    if (event is KeyDownEvent) _keys.add(event.logicalKey);
+    if (event is KeyDownEvent) {
+      _keys.add(event.logicalKey);
+      if (event.logicalKey == LogicalKeyboardKey.keyE ||
+          event.logicalKey == LogicalKeyboardKey.enter) {
+        _itemKeys.add(event.logicalKey);
+      }
+    }
     if (event is KeyUpEvent) _keys.remove(event.logicalKey);
   }
 
@@ -324,6 +369,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     _audio.pause();
     SessionScope.read(context).setPaused(true);
     _keys.clear();
+    _itemKeys.clear();
     setState(() {
       _paused = true;
       _pauseArmed = false;
@@ -347,6 +393,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       _countdown = 0;
       _sceneLive = false;
       _keys.clear();
+      _itemKeys.clear();
     });
     _audio.menu();
     WidgetsBinding.instance.addPostFrameCallback((_) => _focusLobby());
