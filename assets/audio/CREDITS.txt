@@ -8,5 +8,7 @@ https://opengameart.org/content/racing-car-engine-sound-loops
 Derrapagem: Tom Haigh (audible-edge), edição de qubodup, CC BY 3.0.
 https://opengameart.org/content/car-tire-squeal-skid-loop
 
-Contagem, largada, turbo e batida: Kenney, CC0.
+Foguete do turbo: gerado para o Volta, ronco grave em loop.
+
+Contagem, largada e batida: Kenney, CC0.
 https://kenney.nl

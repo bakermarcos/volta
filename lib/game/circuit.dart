@@ -30,7 +30,7 @@ class Circuit {
           (distances[segment + 1] - distances[segment]);
       return (x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t);
     });
-    for (var attempt = 0; attempt < 8 && overlapsRoad(margin: 20); attempt++) {
+    for (var attempt = 0; attempt < 16 && overlapsRoad(margin: 20); attempt++) {
       for (var i = 0; i < points.length; i++) {
         points[i] = (x: points[i].x * 1.15, y: points[i].y * 1.15);
       }

@@ -100,8 +100,15 @@ void main() {
       expect(scene.race!.elapsed, pausedAt);
       await tester.tap(find.text('Continuar'));
       await tester.pump(const Duration(milliseconds: 300));
-      scene.onAdvance!(.05);
-      expect(scene.race!.elapsed, greaterThan(pausedAt));
+      scene.onAdvance!(.1);
+      expect(scene.race!.elapsed, closeTo(pausedAt + .1, .001));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await tester.tap(find.text('Sair da corrida'));
+      await tester.pump();
+      expect(find.text('Largar  →'), findsOneWidget);
+      expect(find.text('Corrida pausada'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -166,7 +173,7 @@ void main() {
       expect(session.history.races.length, 1);
       expect(car.lapTimes.length, 1);
       await tester.pump(const Duration(seconds: 1));
-      await tester.tap(find.text('Voltar ao lobby  →'));
+      await tester.tap(find.text('Voltar ao lobby'));
       await tester.runAsync(() async {
         await Future<void>.delayed(Duration.zero);
       });

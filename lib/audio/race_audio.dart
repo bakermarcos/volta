@@ -9,16 +9,18 @@ class RaceAudio {
   bool get music => _music;
   set music(bool value) {
     _music = value;
-    final player = _musicPlayer;
-    if (player == null) return;
-    _run(() => player.setVolume(value ? _musicLevel : 0));
+    _run(
+      () =>
+          _activeMusic()?.setVolume(value ? _musicLevel : 0) ?? Future.value(),
+    );
   }
 
-  final _boosting = <String, bool>{};
   final _speed = <String, double>{};
   AudioPlayer? _musicPlayer;
+  AudioPlayer? _raceMusic;
   AudioPlayer? _engine;
   AudioPlayer? _skid;
+  AudioPlayer? _rocket;
   final _shots = <AudioPlayer>[];
   var _shot = 0;
   var _track = '';
@@ -31,31 +33,33 @@ class RaceAudio {
   var _mixAt = 0.0;
   var _hitAt = 1.0;
   var _engineLevel = -1.0;
-  var _engineRate = 0.0;
   var _skidLevel = -1.0;
+  var _rocketLevel = -1.0;
+  var _launch = 0.0;
 
   void menu() {
     _live = false;
+    _launch = 0;
+    _run(_shareSpeakers);
     _run(_quietCars);
     _loop('audio/menu.m4a', .4);
+    _run(_warmCars);
+    _run(_warmRaceMusic);
   }
 
   void race() {
     _live = true;
     _paused = false;
-    _boosting.clear();
     _speed.clear();
-    _run(() async {
-      await _engine?.resume();
-      await _skid?.resume();
-    });
-    _loop('audio/race.m4a', .46);
+    _run(_startEngine);
+    _loop('audio/race.m4a', .18);
+    _run(_warmCars);
   }
 
   void climax() {
     _live = true;
-    if (music) _once('audio/final_lap.m4a', .85);
-    _loop('audio/climax.m4a', .5);
+    if (music) _once('audio/final_lap.m4a', .4);
+    _loop('audio/climax.m4a', .2);
   }
 
   void win() {
@@ -63,6 +67,7 @@ class RaceAudio {
     _run(() async {
       await _quietCars();
       await _musicPlayer?.stop();
+      await _raceMusic?.pause();
       _track = '';
       if (_music) await _playShot('audio/win.m4a', .85);
     });
@@ -73,13 +78,19 @@ class RaceAudio {
     if (engine != null) {
       await engine.setVolume(0);
       await engine.pause();
-      _engineLevel = 0;
+      _engineLevel = -1;
     }
     final skid = _skid;
     if (skid != null) {
       await skid.setVolume(0);
       await skid.pause();
-      _skidLevel = 0;
+      _skidLevel = -1;
+    }
+    final rocket = _rocket;
+    if (rocket != null) {
+      await rocket.setVolume(0);
+      await rocket.pause();
+      _rocketLevel = -1;
     }
   }
 
@@ -90,18 +101,21 @@ class RaceAudio {
     _paused = true;
     _run(() async {
       await _musicPlayer?.pause();
+      await _raceMusic?.pause();
       await _engine?.pause();
       await _skid?.pause();
+      await _rocket?.pause();
     });
   }
 
   void resume() {
     _paused = false;
     _run(() async {
-      if (_track.isNotEmpty) await _musicPlayer?.resume();
+      if (_track.isNotEmpty) await _activeMusic()?.resume();
       if (_live) {
         await _engine?.resume();
         await _skid?.resume();
+        await _rocket?.resume();
       }
     });
   }
@@ -111,13 +125,9 @@ class RaceAudio {
     var speed = 0.0;
     var slip = 0.0;
     var launch = 0.0;
-    var boost = false;
     var boosting = false;
     for (final car in race.cars) {
-      if (car.finishedAt != null || car.retired) {
-        _boosting[car.driver.id] = false;
-        continue;
-      }
+      if (car.finishedAt != null || car.retired) continue;
       speed = math.max(speed, car.speed.abs());
       final steer = car.steering.abs();
       if (car.speed.abs() > 70 && steer > .2) {
@@ -127,40 +137,48 @@ class RaceAudio {
       _speed[car.driver.id] = car.speed;
       if (!hold && dt > 0) {
         final rate = (car.speed - previous) / dt;
-        if (rate > 70 && car.speed > 20 && car.speed < 360) {
-          launch = math.max(launch, ((rate - 70) / 180).clamp(0.0, 1.0));
+        if (rate > 40 && car.speed > 8 && car.speed < 420) {
+          launch = math.max(launch, ((rate - 40) / 180).clamp(0.0, 1.0));
         }
       }
-      final was = _boosting[car.driver.id] ?? false;
-      if (car.boosting && !was) boost = true;
       if (car.boosting) boosting = true;
-      _boosting[car.driver.id] = car.boosting;
     }
-    if (boost) _once('audio/turbo.m4a', .65);
     _hitAt += dt;
     if (race.bumps > 0 && _hitAt > .18) {
       _hitAt = 0;
       _once('audio/hit.m4a', .75);
     }
-    _wantedEngine = hold ? .16 : .34 + (boosting ? .08 : 0);
-    _wantedRate = (.78 + (speed / 520).clamp(0.0, 1.0) * .7).clamp(.7, 1.6);
-    _wantedSkid = math.max(slip * .62, launch * .4);
+    final rising = launch > _launch;
+    _launch = math.max(launch, math.max(0, _launch - dt / .6));
+    final pace = (speed / 520).clamp(0.0, 1.0);
+    _wantedEngine = hold ? .4 : .58 + pace * .16;
+    if (_launch > 0) _wantedEngine = math.max(_wantedEngine, .78);
+    _wantedSkid = slip * .62;
+    _wantedRocket = boosting ? .7 : 0;
     _mixAt += dt;
-    if (_mixAt < .08 && _engineLevel >= 0) return;
+    if (rising) _mixAt = .25;
+    if (_mixAt < .25 && _engineLevel >= 0) return;
     _mixAt = 0;
     _kick();
   }
 
   var _wantedEngine = 0.0;
-  var _wantedRate = 1.0;
   var _wantedSkid = 0.0;
+  var _wantedRocket = 0.0;
 
   Future<void> dispose() {
     _closed = true;
     _live = false;
     return _queue
         .then((_) async {
-          for (final player in [_musicPlayer, _engine, _skid, ..._shots]) {
+          for (final player in [
+            _musicPlayer,
+            _raceMusic,
+            _engine,
+            _skid,
+            _rocket,
+            ..._shots,
+          ]) {
             await player?.dispose();
           }
         })
@@ -170,11 +188,24 @@ class RaceAudio {
   void _loop(String asset, double level) {
     _musicLevel = level;
     if (_track == asset) {
-      _run(() => _musicPlayer?.setVolume(music ? level : 0) ?? Future.value());
+      _run(
+        () => _activeMusic()?.setVolume(music ? level : 0) ?? Future.value(),
+      );
       return;
     }
     _track = asset;
     _run(() async {
+      if (asset == 'audio/race.m4a') {
+        await _warmRaceMusic();
+        if (_track != asset || _closed) return;
+        await _musicPlayer?.pause();
+        final player = _raceMusic;
+        if (player == null) return;
+        await player.setVolume(music ? level : 0);
+        await player.resume();
+        return;
+      }
+      await _raceMusic?.pause();
       final player = _musicPlayer ??= AudioPlayer();
       await player.setReleaseMode(ReleaseMode.loop);
       await player.stop();
@@ -182,6 +213,29 @@ class RaceAudio {
       if (_track != asset || _closed) return;
       await player.play(AssetSource(asset));
     });
+  }
+
+  AudioPlayer? _activeMusic() =>
+      _track == 'audio/race.m4a' ? _raceMusic : _musicPlayer;
+
+  Future<void>? _raceMusicWarm;
+
+  Future<void> _warmRaceMusic() {
+    return _raceMusicWarm ??= _loadRaceMusic();
+  }
+
+  Future<void> _loadRaceMusic() async {
+    try {
+      await _shareSpeakers();
+      final player = _raceMusic ??= AudioPlayer();
+      await player.setReleaseMode(ReleaseMode.loop);
+      await player.setVolume(0);
+      if (_closed) return;
+      await player.play(AssetSource('audio/race.m4a'));
+      await player.pause();
+    } catch (_) {
+      _raceMusicWarm = null;
+    }
   }
 
   void _once(String asset, double volume) =>
@@ -225,30 +279,113 @@ class RaceAudio {
     });
   }
 
+  Future<void> _shareSpeakers() async {
+    if (_speakers) return;
+    _speakers = true;
+    try {
+      await AudioPlayer.global.setAudioContext(
+        AudioContext(
+          android: const AudioContextAndroid(
+            audioFocus: AndroidAudioFocus.none,
+            usageType: AndroidUsageType.game,
+          ),
+          iOS: AudioContextIOS(options: {AVAudioSessionOptions.mixWithOthers}),
+        ),
+      );
+    } catch (_) {
+      _speakers = false;
+    }
+  }
+
+  var _speakers = false;
+
   Future<void> _mix() async {
-    final engine = _engine ??= AudioPlayer();
-    final skid = _skid ??= AudioPlayer();
-    if (_engineLevel < 0) {
+    await _shareSpeakers();
+    await _warmCars();
+    final engine = _engine;
+    final skid = _skid;
+    final rocket = _rocket;
+    if (engine == null || skid == null || rocket == null) return;
+    await _audible(
+      engine,
+      'audio/engine.wav',
+      _wantedEngine,
+      _engineLevel,
+      (level) => _engineLevel = level,
+    );
+    await _audible(
+      skid,
+      'audio/skid.wav',
+      _wantedSkid,
+      _skidLevel,
+      (level) => _skidLevel = level,
+    );
+    await _audible(
+      rocket,
+      'audio/rocket.wav',
+      _wantedRocket,
+      _rocketLevel,
+      (level) => _rocketLevel = level,
+    );
+  }
+
+  Future<void> _startEngine() async {
+    await _warmCars();
+    final engine = _engine;
+    if (engine == null || _closed) return;
+    _wantedEngine = math.max(_wantedEngine, .58);
+    await _audible(
+      engine,
+      'audio/engine.wav',
+      _wantedEngine,
+      -1,
+      (level) => _engineLevel = level,
+    );
+  }
+
+  Future<void> _audible(
+    AudioPlayer player,
+    String asset,
+    double wanted,
+    double current,
+    void Function(double level) store,
+  ) async {
+    if (wanted <= .01) {
+      if (current < 0) return;
+      await player.setVolume(0);
+      await player.pause();
+      store(-1);
+      return;
+    }
+    if (current < 0) {
+      await player.setReleaseMode(ReleaseMode.loop);
+      await player.play(AssetSource(asset), volume: wanted);
+      store(wanted);
+      return;
+    }
+    if ((current - wanted).abs() <= .04) return;
+    await player.setVolume(wanted);
+    store(wanted);
+  }
+
+  Future<void>? _carsWarm;
+
+  Future<void> _warmCars() {
+    return _carsWarm ??= _loadCars();
+  }
+
+  Future<void> _loadCars() async {
+    try {
+      final engine = _engine ??= AudioPlayer();
+      final skid = _skid ??= AudioPlayer();
+      final rocket = _rocket ??= AudioPlayer();
+      if (_engineLevel >= 0) return;
       await engine.setReleaseMode(ReleaseMode.loop);
       await skid.setReleaseMode(ReleaseMode.loop);
-      await engine.setVolume(0);
-      await skid.setVolume(0);
-      await engine.play(AssetSource('audio/engine.wav'));
-      await skid.play(AssetSource('audio/skid.wav'));
-      _engineLevel = 0;
-      _skidLevel = 0;
-    }
-    if ((_engineLevel - _wantedEngine).abs() > .02) {
-      await engine.setVolume(_wantedEngine);
-      _engineLevel = _wantedEngine;
-    }
-    if ((_engineRate - _wantedRate).abs() > .04) {
-      await engine.setPlaybackRate(_wantedRate);
-      _engineRate = _wantedRate;
-    }
-    if ((_skidLevel - _wantedSkid).abs() > .03) {
-      await skid.setVolume(_wantedSkid);
-      _skidLevel = _wantedSkid;
+      await rocket.setReleaseMode(ReleaseMode.loop);
+    } catch (_) {
+      _carsWarm = null;
+      _engineLevel = -1;
     }
   }
 

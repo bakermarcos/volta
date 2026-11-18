@@ -13,6 +13,8 @@ const playerColors = [
   0xFFFFC65C,
   0xFFC5A0FF,
   0xFF56E2CC,
+  0xFFFF7755,
+  0xFFE9EEFA,
 ];
 
 class Driver {
@@ -30,7 +32,8 @@ class Driver {
   final bool connected, ready;
   final int? colorIndex;
   final int model;
-  int get color => playerColors[(colorIndex ?? slot) % playerColors.length];
+  int get paletteIndex => (colorIndex ?? slot) % playerColors.length;
+  int get color => playerColors[paletteIndex];
 
   Driver copyWith({
     String? name,
@@ -60,6 +63,12 @@ class ControlInput {
   final double steer;
 }
 
+class PowerPickup {
+  PowerPickup(this.x, this.y);
+  final double x, y;
+  double availableAt = 0;
+}
+
 class Car {
   Car(this.driver, int grid, [Circuit? track]) {
     final circuit = track ?? Circuit.island;
@@ -75,6 +84,8 @@ class Car {
   final Driver driver;
   late double x, y, heading, progress, trackAngle;
   double speed = 0, boostCharge = 1, boostCooldown = 0, steering = 0;
+  double slowedUntil = 0, surgeUntil = 0, powerNoticeUntil = 0;
+  String? powerNotice;
   double? finishedAt;
   final lapTimes = <double>[];
   int nextCheckpoint = 1;
@@ -97,13 +108,32 @@ class Race {
     this.mirrored = false,
     this.reversed = false,
     this.timeTrial = false,
-  }) : circuit = circuit ?? Circuit.island,
+    math.Random? random,
+  }) : _random = random ?? math.Random(),
+       circuit = circuit ?? Circuit.island,
        cars = [
          for (var i = 0; i < drivers.length; i++) Car(drivers[i], i, circuit),
        ] {
     checkpoints = [
       for (var i = 0; i < checkpointCount; i++) _checkpoint(this.circuit, i),
     ];
+    if (cars.length > 1 && !timeTrial) {
+      final rows = (this.circuit.length / 5500).round().clamp(3, 12);
+      for (var row = 1; row <= rows; row++) {
+        final angle = row * 2 * math.pi / (rows + 1);
+        final point = this.circuit.point(angle);
+        final heading = this.circuit.heading(angle);
+        for (final lane in [-.28, 0.0, .28]) {
+          final offset = lane * this.circuit.width;
+          pickups.add(
+            PowerPickup(
+              point.x - math.sin(heading) * offset,
+              point.y + math.cos(heading) * offset,
+            ),
+          );
+        }
+      }
+    }
     if (cars.length == 1) {
       final start = this.circuit.point(0);
       cars.first
@@ -128,6 +158,8 @@ class Race {
   }
 
   final List<Car> cars;
+  final math.Random _random;
+  final pickups = <PowerPickup>[];
   double? finishDeadline;
   double? get finishingIn =>
       finishDeadline == null ? null : math.max(0, finishDeadline! - elapsed);
@@ -168,8 +200,9 @@ class Race {
       }
       final input = inputs[car.driver.id] ?? const ControlInput();
       final old = circuit.nearest(car.x, car.y, nearAngle: car.trackAngle);
-      final pace = turbo ? 1.4 : 1.0;
+      final pace = (turbo ? 1.4 : 1.0) * (elapsed < car.slowedUntil ? .55 : 1);
       final onRoad = old.distance < circuit.width / 2;
+      final surge = !hold && onRoad && elapsed < car.surgeUntil;
       if (!input.boost) car._boostReady = true;
       car.boosting =
           !hold &&
@@ -203,13 +236,15 @@ class Race {
             throttle *
             (braking
                 ? 300
-                : car.boosting
+                : car.boosting || surge
                 ? 555
                 : 247.5) *
             dt *
             pace;
       }
-      final maximum = (onRoad ? (car.boosting ? 615.0 : 405.0) : 195.0) * pace;
+      final maximum =
+          (onRoad ? (car.boosting ? 615.0 : (surge ? 540.0 : 405.0)) : 195.0) *
+          pace;
       if (car.speed > maximum) {
         car.speed = math.max(
           maximum,
@@ -254,6 +289,7 @@ class Race {
     }
     _resolveContacts();
     _settleShoulder();
+    _collectPower();
     for (var i = 0; i < cars.length; i++) {
       final car = cars[i];
       if (car.finishedAt != null || car.retired) continue;
@@ -325,6 +361,52 @@ class Race {
       return null;
     }
     return fraction;
+  }
+
+  void _collectPower() {
+    for (final car in cars) {
+      if (car.finishedAt != null || car.retired) continue;
+      for (final pickup in pickups) {
+        if (elapsed < pickup.availableAt) continue;
+        final dx = car.x - pickup.x, dy = car.y - pickup.y;
+        if (dx * dx + dy * dy > 32 * 32) continue;
+        pickup.availableAt = elapsed + 8;
+        Car? target;
+        var nearest = 320 * 320.0;
+        final outcome = _random.nextInt(3);
+        if (outcome == 2) {
+          car.surgeUntil = elapsed + 1.25;
+          car.powerNotice = 'Impulso extra';
+          car.powerNoticeUntil = elapsed + 2;
+          break;
+        }
+        if (outcome == 1) {
+          for (final rival in cars) {
+            if (rival == car || rival.retired || rival.finishedAt != null) {
+              continue;
+            }
+            final x = rival.x - car.x, y = rival.y - car.y;
+            final distance = x * x + y * y;
+            if (distance >= nearest) continue;
+            nearest = distance;
+            target = rival;
+          }
+        }
+        if (target == null) {
+          car.boostCharge = 1;
+          car.boostCooldown = 0;
+          car.powerNotice = 'Turbo recarregado';
+        } else {
+          target.speed *= .65;
+          target.slowedUntil = elapsed + 2;
+          target.powerNotice = 'Onda recebida';
+          target.powerNoticeUntil = elapsed + 2;
+          car.powerNotice = 'Onda de lentidão';
+        }
+        car.powerNoticeUntil = elapsed + 2;
+        break;
+      }
+    }
   }
 
   void _resolveContacts() {

@@ -43,6 +43,9 @@ class _RaceSceneState extends State<RaceScene> {
   );
   double _hudElapsed = 0;
   final _clouds = <s.Node>[];
+  s.InstancedMesh? _pickupMesh;
+  final _pickupVisibility = <bool>[];
+  bool get _tvBudget => Platform.isAndroid;
   late final Race _preview;
   Circuit get _circuit => (widget.race ?? _preview).circuit;
   final _playerCameras = <String, s.PerspectiveCamera>{};
@@ -77,9 +80,9 @@ class _RaceSceneState extends State<RaceScene> {
   void didUpdateWidget(RaceScene oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.race != widget.race && _scene != null) {
-      _dropKarts();
       _playerCameras.clear();
-      _tick(Duration.zero, 0);
+      _pickupMesh?.clearInstances();
+      _pickupVisibility.clear();
     }
   }
 
@@ -89,7 +92,14 @@ class _RaceSceneState extends State<RaceScene> {
       if (!mounted) return;
       final scene = s.Scene();
       _scene = scene;
-      final android = Platform.isAndroid;
+      final android = _tvBudget;
+      if (android) {
+        scene.renderQuality
+          ..tier = s.RenderQualityTier.low
+          ..adaptive = true
+          ..targetFrameRate = 30
+          ..minRenderScale = .65;
+      }
       scene.directionalLight = s.DirectionalLight(
         direction: v.Vector3(-.5, -1, .3),
         intensity: 2.4,
@@ -152,7 +162,7 @@ class _RaceSceneState extends State<RaceScene> {
   }) {
     final node = s.Node(name: name, mesh: s.Mesh(geometry, _material(color)))
       ..position = v.Vector3(x, y, z)
-      ..frustumCulled = false
+      ..frustumCulled = _tvBudget && parent == null && name.isEmpty
       ..shadowStatic = parent == null;
     (parent ?? _scene!.root).add(node);
     return node;
@@ -415,33 +425,44 @@ class _RaceSceneState extends State<RaceScene> {
         ..addComponent(s.InstancedMeshComponent(posts)),
     );
     final start = _circuit.point(0), heading = _circuit.heading(0);
+    final startTiles = s.InstancedMesh(
+      geometry: s.CuboidGeometry(v.Vector3(_circuit.width / 200, .025, .25)),
+      material: s.UnlitMaterial()..depthLayer = 5,
+      cullInstances: false,
+    );
+    final startRotation = v.Quaternion.axisAngle(
+      v.Vector3(0, 1, 0),
+      math.pi / 2 - heading,
+    );
     for (var lane = 0; lane < 10; lane++) {
       for (var row = 0; row < 3; row++) {
-        final side =
-                -_circuit.width / 2 +
-                _circuit.width / 20 +
-                lane * _circuit.width / 10,
-            advance = row * 5.0;
-        final tile = _box(
-          (start.x - math.sin(heading) * side + math.cos(heading) * advance) /
-              20,
-          _circuit.height(0) / 20 + .0125,
-          (start.y + math.cos(heading) * side + math.sin(heading) * advance) /
-              20,
-          _circuit.width / 200,
-          .025,
-          .25,
-          (lane + row).isEven ? 0xFFFAF4DE : 0xFF202C3B,
-        );
-        for (final primitive in tile.mesh!.primitives) {
-          primitive.material.depthLayer = 5;
-        }
-        tile.rotation = v.Quaternion.axisAngle(
-          v.Vector3(0, 1, 0),
-          math.pi / 2 - heading,
+        final side = (lane - 4.5) * _circuit.width / 10;
+        final advance = row * 5.0;
+        startTiles.addInstance(
+          v.Matrix4.compose(
+            v.Vector3(
+              (start.x -
+                      math.sin(heading) * side +
+                      math.cos(heading) * advance) /
+                  20,
+              _circuit.height(0) / 20 + .0125,
+              (start.y +
+                      math.cos(heading) * side +
+                      math.sin(heading) * advance) /
+                  20,
+            ),
+            startRotation,
+            v.Vector3.all(1),
+          ),
+          color: _linearColor((lane + row).isEven ? 0xFFFAF4DE : 0xFF202C3B),
         );
       }
     }
+    scene.add(
+      s.Node(name: 'start-grid')
+        ..shadowCastingMode = s.ShadowCastingMode.off
+        ..addComponent(s.InstancedMeshComponent(startTiles)),
+    );
     for (final lane in [-_circuit.width / 2 - 15, _circuit.width / 2 + 15]) {
       final x = (start.x - math.sin(heading) * lane) / 20,
           z = (start.y + math.cos(heading) * lane) / 20;
@@ -466,7 +487,7 @@ class _RaceSceneState extends State<RaceScene> {
       math.pi / 2 - heading,
     );
     final random = math.Random(19);
-    for (var i = 0; i < 24; i++) {
+    for (var i = 0; i < 24; i += _tvBudget ? 3 : 1) {
       final angle = i * math.pi / 12;
       final p = _circuit.point(angle);
       final heading = _circuit.heading(angle);
@@ -517,7 +538,7 @@ class _RaceSceneState extends State<RaceScene> {
         0,
       );
     }
-    for (var i = 0; i < 7; i++) {
+    for (var i = 0; i < (_tvBudget ? 0 : 7); i++) {
       final cloud = s.Node(name: 'cloud-$i')
         ..frustumCulled = false
         ..position = v.Vector3(
@@ -552,7 +573,7 @@ class _RaceSceneState extends State<RaceScene> {
       }
     }
 
-    for (var i = 0; i < 24; i++) {
+    for (var i = 0; i < 24; i += _tvBudget ? 3 : 1) {
       final a = i * math.pi / 12, b = (i + 1) * math.pi / 12;
       v.Vector3 point(double angle, double radius, double y) =>
           v.Vector3(math.cos(angle) * radius, y, math.sin(angle) * radius);
@@ -631,14 +652,15 @@ class _RaceSceneState extends State<RaceScene> {
       parent: body,
     )..visible = false;
     final smoke = <_TireSmoke>[
-      for (final (index, side) in [-1.0, 1.0].indexed)
-        _smoke(
-          body,
-          side,
-          at: wheels[index + 2].position + v.Vector3(0, .04, 0),
-        ),
+      if (!_tvBudget)
+        for (final (index, side) in [-1.0, 1.0].indexed)
+          _smoke(
+            body,
+            side,
+            at: wheels[index + 2].position + v.Vector3(0, .04, 0),
+          ),
     ];
-    return _Kart(root, body, wheels, [flame], smoke, style: 1);
+    return _Kart(root, body, wheels, [flame], smoke, style: 1, color: color);
   }
 
   _Kart _helmetKart(s.Node root, s.Node body, Car car) {
@@ -646,6 +668,9 @@ class _RaceSceneState extends State<RaceScene> {
     _faceTrack(mesh, .98);
     _paintHelmet(mesh, car.driver.color);
     body.add(mesh);
+    for (final side in [-.29, .29]) {
+      _exhaust(mesh, side);
+    }
     final wheels = [
       for (final name in [
         'Roda Frente E',
@@ -655,23 +680,47 @@ class _RaceSceneState extends State<RaceScene> {
       ])
         mesh.getChildByName(name)!,
     ];
-    final flame = _mesh(
-      s.IcosphereGeometry(radius: .35, subdivisions: 1),
-      0xFFFFD061,
-      0,
-      .4,
-      -1.15,
-      parent: mesh,
-    )..visible = false;
-    final smoke = <_TireSmoke>[
-      for (final (index, side) in [-1.0, 1.0].indexed)
-        _smoke(
-          mesh,
-          side,
-          at: wheels[index + 2].position + v.Vector3(0, .04, 0),
-        ),
+    final flames = [
+      for (final side in [-.29, .29])
+        _flame(mesh, side, at: v.Vector3(side, .43, -1.28)),
     ];
-    return _Kart(root, body, wheels, [flame], smoke, style: 0);
+    final smoke = <_TireSmoke>[
+      if (!_tvBudget)
+        for (final (index, side) in [-1.0, 1.0].indexed)
+          _smoke(
+            mesh,
+            side,
+            at: wheels[index + 2].position + v.Vector3(0, .04, 0),
+          ),
+    ];
+    return _Kart(
+      root,
+      body,
+      wheels,
+      flames,
+      smoke,
+      style: 0,
+      color: car.driver.color,
+      shell: mesh,
+      wheel: mesh.getChildByName('Volante'),
+    );
+  }
+
+  void _exhaust(s.Node parent, double side) {
+    final pipe = _mesh(
+      s.CylinderGeometry(
+        topRadius: .045,
+        bottomRadius: .058,
+        height: .36,
+        radialSegments: 8,
+      ),
+      0xFFD5DDE3,
+      side,
+      .43,
+      -1.08,
+      parent: parent,
+    );
+    pipe.rotation = v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -math.pi / 2);
   }
 
   void _paintHelmet(s.Node node, int color) {
@@ -683,13 +732,21 @@ class _RaceSceneState extends State<RaceScene> {
       'Capacete',
       'Cubo',
     };
-    if (names.contains(node.name)) {
+    final stripe = node.name == 'Faixa central';
+    if (stripe || names.contains(node.name)) {
       final factor = _linearColor(color);
+      if (stripe) {
+        factor
+          ..x = factor.x * .5 + .475
+          ..y = factor.y * .5 + .435
+          ..z = factor.z * .5 + .325;
+      }
       final mesh = node.mesh;
       if (mesh != null) {
         for (final primitive in mesh.primitives) {
           primitive.material = s.PhysicallyBasedMaterial()
             ..baseColorFactor = factor
+            ..metallicFactor = 0
             ..roughnessFactor = .55;
         }
       }
@@ -738,14 +795,24 @@ class _RaceSceneState extends State<RaceScene> {
         _flame(mesh, side, at: v.Vector3(side * .7, .22, -.58)),
     ];
     final smoke = <_TireSmoke>[
-      for (final (index, side) in [-1.0, 1.0].indexed)
-        _smoke(
-          mesh,
-          side,
-          at: wheels[index + 2].position + v.Vector3(0, .04, 0),
-        ),
+      if (!_tvBudget)
+        for (final (index, side) in [-1.0, 1.0].indexed)
+          _smoke(
+            mesh,
+            side,
+            at: wheels[index + 2].position + v.Vector3(0, .04, 0),
+          ),
     ];
-    return _Kart(root, body, wheels, flames, smoke, style: 2);
+    return _Kart(
+      root,
+      body,
+      wheels,
+      flames,
+      smoke,
+      style: 2,
+      color: color,
+      shell: mesh,
+    );
   }
 
   Future<void> _loadOobiAtlas() async {
@@ -756,9 +823,9 @@ class _RaceSceneState extends State<RaceScene> {
     );
     final view = ByteData.sublistView(bytes);
     final jsonLen = view.getUint32(12, Endian.little);
-    final json =
-        jsonDecode(utf8.decode(bytes.sublist(20, 20 + jsonLen)))
-            as Map<String, dynamic>;
+    final json = jsonDecode(
+      utf8.decode(bytes.sublist(20, 20 + jsonLen)),
+    ) as Map<String, dynamic>;
     final bin = 20 + jsonLen + 8;
     final image = (json['images'] as List).first as Map<String, dynamic>;
     final bufferView =
@@ -767,7 +834,9 @@ class _RaceSceneState extends State<RaceScene> {
     final start = bin + (bufferView['byteOffset'] as int? ?? 0);
     final png = bytes.sublist(start, start + (bufferView['byteLength'] as int));
     final frame = await (await ui.instantiateImageCodec(png)).getNextFrame();
-    final raw = await frame.image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    final raw = await frame.image.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
     _oobiSize = frame.image.width;
     _oobiPixels = raw!.buffer.asUint8List();
     frame.image.dispose();
@@ -785,8 +854,7 @@ class _RaceSceneState extends State<RaceScene> {
       final minChannel = math.min(r, math.min(g, b));
       if (maxChannel < 40 || maxChannel == minChannel) continue;
       if ((maxChannel - minChannel) / maxChannel < .28) continue;
-      final scale =
-          (0.299 * r + 0.587 * g + 0.114 * b) / orange;
+      final scale = (0.299 * r + 0.587 * g + 0.114 * b) / orange;
       out[i] = (red * scale).round().clamp(0, 255);
       out[i + 1] = (green * scale).round().clamp(0, 255);
       out[i + 2] = (blue * scale).round().clamp(0, 255);
@@ -841,8 +909,9 @@ class _RaceSceneState extends State<RaceScene> {
       node.rotation = v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -math.pi / 2);
     }
 
-    tongue(1.45, .09, .032, 0xFFFFD98A);
-    tongue(.95, .046, .016, 0xFFF4FBFF);
+    tongue(1.25, .11, .055, 0xFFFF7A00);
+    tongue(.9, .07, .034, 0xFFFFB000);
+    tongue(.55, .04, .016, 0xFFFFE26A);
     return anchor;
   }
 
@@ -888,14 +957,13 @@ class _RaceSceneState extends State<RaceScene> {
     return _TireSmoke(trail, hug, trailShape, side, keptTrail);
   }
 
-  void _dropKarts() {
-    for (final kart in _karts.values) {
-      for (final tire in kart.smoke) {
-        tire.trailNode.parent?.remove(tire.trailNode);
-      }
-      kart.root.parent?.remove(kart.root);
+  void _releaseKart(int slot) {
+    final kart = _karts.remove(slot);
+    if (kart == null) return;
+    for (final tire in kart.smoke) {
+      tire.trailNode.parent?.remove(tire.trailNode);
     }
-    _karts.clear();
+    kart.root.parent?.remove(kart.root);
   }
 
   s.ParticleEmitterComponent _puffs({
@@ -933,7 +1001,6 @@ class _RaceSceneState extends State<RaceScene> {
             ),
           ),
           s.LinearDragModule(2.4),
-          s.TurbulenceModule(strength: .25, frequency: 1.4, seed: side.round()),
           const s.RotationModule(),
         ],
         lifetime: life,
@@ -947,6 +1014,47 @@ class _RaceSceneState extends State<RaceScene> {
     )..aspectRatio = 1.3;
   }
 
+  void _updatePickups(Race race) {
+    if (race.pickups.isEmpty) return;
+    final mesh = _pickupMesh ??= _addPickupMesh();
+    var dirty = _pickupVisibility.length != race.pickups.length;
+    if (dirty) {
+      _pickupVisibility
+        ..clear()
+        ..addAll(List.filled(race.pickups.length, false));
+    }
+    for (final (i, pickup) in race.pickups.indexed) {
+      final visible = race.elapsed >= pickup.availableAt;
+      if (_pickupVisibility[i] == visible) continue;
+      _pickupVisibility[i] = visible;
+      dirty = true;
+    }
+    if (!dirty) return;
+    mesh.clearInstances();
+    for (final (i, pickup) in race.pickups.indexed) {
+      if (_pickupVisibility[i]) {
+        mesh.addInstance(
+          v.Matrix4.translationValues(pickup.x / 20, .6, pickup.y / 20),
+        );
+      }
+    }
+  }
+
+  s.InstancedMesh _addPickupMesh() {
+    final mesh = s.InstancedMesh(
+      geometry: s.CuboidGeometry(v.Vector3.all(.85)),
+      material: _material(0xFFCA67FF),
+      cullInstances: false,
+    );
+    _scene!.add(
+      s.Node(name: 'power-pickups')
+        ..frustumCulled = false
+        ..shadowCastingMode = s.ShadowCastingMode.off
+        ..addComponent(s.InstancedMeshComponent(mesh)),
+    );
+    return mesh;
+  }
+
   void _tick(Duration elapsed, double dt) {
     if (dt > 0) {
       _presented = true;
@@ -954,12 +1062,35 @@ class _RaceSceneState extends State<RaceScene> {
     }
     final race = widget.race ?? _preview;
     final seconds = elapsed.inMicroseconds / 1000000;
+    _updatePickups(race);
+    const logFrames = bool.fromEnvironment('VOLTA_FRAME_STATS');
+    if (logFrames && widget.race != null && dt > 0) {
+      _logFrame(dt, race.cars.length);
+    }
     final slots = race.cars.map((c) => c.driver.slot).toSet();
     for (final entry in _karts.entries) {
       entry.value.root.visible = slots.contains(entry.key);
     }
+    var built = 0;
     for (final car in race.cars) {
-      final kart = _karts.putIfAbsent(car.driver.slot, () => _kart(car));
+      final slot = car.driver.slot;
+      final existing = _karts[slot];
+      final wrongModel =
+          existing != null &&
+          (existing.style != car.driver.model ||
+              (existing.style == 1 && existing.color != car.driver.color));
+      if (existing == null || wrongModel) {
+        if (built == 1) continue;
+        built++;
+        if (wrongModel) _releaseKart(slot);
+        _karts[slot] = _kart(car);
+      }
+      final kart = _karts[slot]!;
+      if (kart.color != car.driver.color && kart.shell != null) {
+        if (kart.style == 0) _paintHelmet(kart.shell!, car.driver.color);
+        if (kart.style == 2) _paintCharacter(kart.shell!, car.driver.color);
+        kart.color = car.driver.color;
+      }
       final height = _circuit.surfaceHeight(car.x, car.y) / 20;
       final position = v.Vector3(car.x / 20, height, car.y / 20);
       final speed = car.speed.isFinite ? car.speed : 0.0;
@@ -1040,6 +1171,13 @@ class _RaceSceneState extends State<RaceScene> {
               v.Quaternion.axisAngle(v.Vector3(1, 0, 0), -kart.spin);
         }
       }
+      final wheel = kart.wheel;
+      if (wheel != null) {
+        wheel.rotation = v.Quaternion.axisAngle(
+          v.Vector3(0, 0, 1),
+          -steer * .7,
+        );
+      }
       final forward = kart.root.rotation.rotated(v.Vector3(0, 0, 1));
       final right = kart.root.rotation.rotated(v.Vector3(1, 0, 0));
       final pulling = !rate.isFinite || rate < 70
@@ -1076,9 +1214,9 @@ class _RaceSceneState extends State<RaceScene> {
       for (final (index, flame) in kart.flames.indexed) {
         flame.visible = car.boosting;
         if (!car.boosting) continue;
-        flame.scale = kart.style != 2
+        flame.scale = kart.style == 1
             ? v.Vector3(.8, .8, 2.2 + math.sin(seconds * 55) * .7)
-            : v.Vector3(1, 1, .78 + .22 * math.sin(seconds * 46 + index * 1.4));
+            : v.Vector3(1, 1, 1.05 + math.sin(seconds * 8 + index) * .1);
       }
     }
     for (var i = 0; i < _clouds.length; i++) {
@@ -1146,7 +1284,7 @@ class _RaceSceneState extends State<RaceScene> {
       }
     }
     _hudElapsed += dt;
-    if (_hudElapsed >= 1 / 30 || dt == 0) {
+    if (_hudElapsed >= (_tvBudget ? 1 / 15 : 1 / 30) || dt == 0) {
       _hudElapsed = 0;
       _overlay.value++;
     }
@@ -1156,6 +1294,23 @@ class _RaceSceneState extends State<RaceScene> {
       _capturing = true;
       _capture(capture);
     }
+  }
+
+  final _frameTimes = <double>[];
+  double _frameWindow = 0;
+  void _logFrame(double dt, int views) {
+    _frameTimes.add(dt);
+    _frameWindow += dt;
+    if (_frameWindow < 5) return;
+    _frameTimes.sort();
+    final fps = _frameTimes.length / _frameWindow;
+    final p95 = _frameTimes[(_frameTimes.length * .95).ceil() - 1] * 1000;
+    debugPrint(
+      'Volta: ${fps.toStringAsFixed(1)} FPS, p95 '
+      '${p95.toStringAsFixed(1)} ms, $views views',
+    );
+    _frameTimes.clear();
+    _frameWindow = 0;
   }
 
   List<s.RenderView> _views(Duration elapsed) {
@@ -1265,7 +1420,7 @@ class _RaceSceneState extends State<RaceScene> {
                 _scene!,
                 viewsBuilder: _views,
                 onTick: _tick,
-                maxFrameRate: widget.race == null ? 30 : 60,
+                maxFrameRate: _tvBudget || widget.race == null ? 30 : 60,
                 warmUp: true,
                 pixelRatio: _pixelRatio(context, constraints.biggest),
                 loadingBuilder: (context, _) => const _LoadingTrack(),
@@ -1287,7 +1442,8 @@ class _RaceSceneState extends State<RaceScene> {
     final longSide = math.max(size.width, size.height);
     if (longSide <= 0 || !longSide.isFinite) return 1;
     final native = View.of(context).devicePixelRatio;
-    return math.min(native, 1280 / longSide);
+    final views = widget.race?.cars.length ?? 1;
+    return math.min(native, (views >= 3 ? 960 : 1280) / longSide);
   }
 }
 
@@ -1302,11 +1458,16 @@ class _Kart {
     this.flames,
     this.smoke, {
     required this.style,
+    required this.color,
+    this.shell,
+    this.wheel,
   });
   final s.Node root, body;
   final List<s.Node> wheels, flames;
   final List<_TireSmoke> smoke;
+  final s.Node? shell, wheel;
   final int style;
+  int color;
   double spin = 0, pitch = 0, drift = 0, lean = 0, puff = 0, lastSpeed = 0;
 }
 
@@ -1621,6 +1782,16 @@ class _PlayerHud extends CustomPainter {
         );
       }
       canvas.restore();
+      final notice = car.powerNotice;
+      if (racing && notice != null && current.elapsed < car.powerNoticeUntil) {
+        _text(
+          canvas,
+          notice,
+          rect.bottomLeft + const Offset(18, -32),
+          16,
+          lime,
+        );
+      }
       final wrongWay =
           racing &&
           car.speed.abs() > 30 &&

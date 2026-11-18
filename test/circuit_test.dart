@@ -12,6 +12,11 @@ void main() {
       expect(track.points.length, 513);
       expect(track.width, greaterThanOrEqualTo(4 * 30.6 + 40));
       expect(track.overlapsRoad(margin: 20), false, reason: track.name);
+      expect(
+        _tightest(track),
+        greaterThanOrEqualTo(track.width / 2),
+        reason: track.name,
+      );
       expect(track.height(0), 1);
       expect(track.surfaceHeight(0, 0), 1);
       expect(track.length, greaterThan(1000), reason: track.name);
@@ -77,4 +82,34 @@ void main() {
       }
     },
   );
+}
+
+double _tightest(Circuit track) {
+  const count = 512;
+  var worst = double.infinity;
+  for (var i = 0; i < count; i++) {
+    final j = (i + 1) % count;
+    final a = track.point(i * math.pi * 2 / count);
+    final b = track.point(j * math.pi * 2 / count);
+    final step = math.max(
+      math.sqrt(math.pow(b.x - a.x, 2) + math.pow(b.y - a.y, 2)),
+      1.0,
+    );
+    final turn = math
+        .atan2(
+          math.sin(
+            track.heading(j * math.pi * 2 / count) -
+                track.heading(i * math.pi * 2 / count),
+          ),
+          math.cos(
+            track.heading(j * math.pi * 2 / count) -
+                track.heading(i * math.pi * 2 / count),
+          ),
+        )
+        .abs();
+    if (turn < .02) continue;
+    final radius = step / turn;
+    if (radius < worst) worst = radius;
+  }
+  return worst;
 }

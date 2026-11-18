@@ -86,7 +86,7 @@ test('ready, countdown, timers and a two-step pause are reflected in the control
  receive({type:'state',status:'lobby',ready:true,readyCount:1,playerCount:1});
  assert.equal(element('ready').textContent,'Cancelar pronto');
  receive({type:'state',status:'countdown',countdown:3});
- assert.equal(element('power').disabled,true);
+ assert.equal(element('power').disabled,false);
  assert.equal(element('countdown').textContent,3);
  receive({type:'state',status:'racing'});
  element('pause').onclick();assert.equal(messages.at(-1).type,'pause');

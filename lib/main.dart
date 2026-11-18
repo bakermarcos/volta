@@ -145,7 +145,7 @@ class EntryScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = SessionScope.watch(context);
     final state = session.state;
-    if (state.active) return const HostScreen();
+    if (state.active && !session.onHome) return const HostScreen();
     final android = Platform.isAndroid;
     return Scaffold(
       body: SafeArea(

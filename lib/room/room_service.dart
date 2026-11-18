@@ -165,6 +165,7 @@ class RoomService {
         'model',
         'gltf-binary',
       );
+      request.response.headers.set('cache-control', 'no-store');
       request.response.add(characterModel);
       await request.response.close();
       return;
@@ -174,6 +175,7 @@ class RoomService {
         'model',
         'gltf-binary',
       );
+      request.response.headers.set('cache-control', 'no-store');
       request.response.add(kartModel);
       await request.response.close();
       return;
@@ -192,6 +194,7 @@ class RoomService {
       request.response.statusCode = HttpStatus.notFound;
     } else {
       request.response.headers.contentType = ContentType.html;
+      request.response.headers.set('cache-control', 'no-store');
       request.response.write(
         controllerHtml.replaceAll('__IPHONE_GUIDE__', '/$code/iphone'),
       );
@@ -251,7 +254,12 @@ class RoomService {
                 return;
               }
               id = _token(16);
-              _players[id!] = Driver(id!, name, slot);
+              final taken = _players.values.map((p) => p.paletteIndex).toSet();
+              final color = taken.contains(slot)
+                  ? Iterable<int>.generate(playerColors.length)
+                        .firstWhere((i) => !taken.contains(i))
+                  : slot;
+              _players[id!] = Driver(id!, name, slot, colorIndex: color);
             }
             deadline.cancel();
             _sockets[id!] = socket;
@@ -260,15 +268,14 @@ class RoomService {
                 'type': 'welcome',
                 'token': id,
                 'color': _players[id]!.color,
-                'colorIndex':
-                    (_players[id]!.colorIndex ?? _players[id]!.slot) %
-                    playerColors.length,
+                'colorIndex': _players[id]!.paletteIndex,
                 'model': _players[id]!.model,
               }),
             );
             _publish();
             return;
           }
+          if (_sockets[id] != socket) return;
           if (decoded['type'] == 'ready' &&
               status == 'lobby' &&
               decoded['ready'] is bool) {
@@ -289,7 +296,12 @@ class RoomService {
               return;
             }
             _players[id!] = _players[id]!.copyWith(
-              colorIndex: color,
+              colorIndex:
+                  _players.values.any(
+                    (p) => p.id != id && p.paletteIndex == color,
+                  )
+                  ? null
+                  : color,
               model: model,
             );
             _publish();
@@ -386,10 +398,11 @@ class RoomService {
           'reversed': reversed,
           'lastResult': _lastResults[entry.key],
           'ready': _players[entry.key]?.ready ?? false,
-          'colorIndex':
-              ((_players[entry.key]?.colorIndex ?? _players[entry.key]?.slot) ??
-                  0) %
-              playerColors.length,
+          'colorIndex': _players[entry.key]?.paletteIndex ?? 0,
+          'takenColors': [
+            for (final player in _players.values)
+              if (player.id != entry.key) player.paletteIndex,
+          ],
           'model': _players[entry.key]?.model ?? 0,
           'readyCount': _players.values
               .where((p) => p.connected && p.ready)
@@ -429,8 +442,8 @@ class RoomService {
     _publish();
   }
 
-  void start() {
-    if (!snapshot.canStart) return;
+  bool start() {
+    if (!snapshot.canStart) return false;
     status = 'countdown';
     countdown = 3;
     paused = false;
@@ -438,6 +451,7 @@ class RoomService {
     _results.clear();
     _inputs.clear();
     _publish();
+    return true;
   }
 
   void advanceCountdown(int value) {
@@ -473,6 +487,7 @@ class RoomService {
           'speed': car.speed.round(),
           'charge': car.boostCharge,
           'boosting': car.boosting,
+          if (race.elapsed < car.powerNoticeUntil) 'power': car.powerNotice,
           'lap': car.laps,
           'totalLaps': race.totalLaps,
           'wrongWay': () {
@@ -533,7 +548,6 @@ class RoomService {
     }
     _inputs.clear();
     _results.clear();
-    _players.removeWhere((id, player) => !player.connected);
     _publish();
   }
 

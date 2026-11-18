@@ -56,7 +56,7 @@ The QR holds a local address with a random code. Each driver gets a token, and c
 
 Controls are rate-limited, with a heartbeat every 300 ms. A command with no update for 1.8 s is neutralized. Disconnecting makes the car brake. The same browser can return to the same kart for up to 15 s before it is dropped. **Sair** frees the slot. **Remover desconectados**, in the lobby, frees slots whose pages were closed.
 
-If there is more than one network interface, pick the Wi-Fi IP in the lobby. Guest networks that isolate devices block the connection. Do not open router ports. Touch control uses HTTP/WebSocket on the local network. Tilt can use HTTPS/WSS with a local certificate. If the firewall asks, allow the volta app on the local network. A phone on 4G/5G or on another Wi-Fi cannot reach the Mac. Reopening the room creates a new QR and address.
+If there is more than one network interface, pick the Wi-Fi IP in the lobby. Guest networks that isolate devices block the connection. Do not open router ports. Touch control uses HTTP/WebSocket on the local network. Tilt can use HTTPS/WSS with a local certificate. If the firewall asks, allow the volta app on the local network. A phone on 4G/5G or on another Wi-Fi cannot reach the Mac. The host keeps the same room, QR, and connections when returning to Home or the lobby. Restarting the app creates a new room.
 
 ## Local history
 
@@ -77,6 +77,14 @@ The screen shows race time and lap time. When **everyone but one** has finished,
 Once, on the Mac, run `tool/setup_https.sh` and reopen the room. The script uses an updated OpenSSL 3.5 LTS to create a local authority and a certificate for the current IP. Private keys stay only in the app's HTTPS folder, with restricted access. There is no tunnel and no cloud.
 
 In Safari on the iPhone, open the HTTP controller and tap **Preparar inclinação no iPhone antes de entrar**. The page downloads the public certificate and explains how to install the profile and enable full trust in Settings → General → About → Certificate Trust Settings. Then open the HTTPS link, join the room, and tap Use tilt. That trust has to be turned on by hand on the iPhone. If the Mac's IP changes, run the script again and reopen the room. The local authority stays the same. To remove trust, delete the profile on the iPhone.
+
+## Volta v0.3
+
+From the pause panel, **Sair da corrida** returns to the lobby. An abandoned race does not enter history. Phones stay connected, and each driver confirms readiness again. The lobby reserves each selected color for one driver at a time.
+
+Purple pickups appear in three to twelve evenly spaced rows, depending on track length. They respawn eight seconds after collection and automatically refill boost, grant a speed burst, or briefly slow the nearest rival within range. Time trials keep their standard rules.
+
+The Android TV build uses a lighter 3D preset. See the [v0.3 plan and platform rollout](docs/v0.3.md) for settings, frame logging, and the TV acceptance test.
 
 ## Measured performance
 

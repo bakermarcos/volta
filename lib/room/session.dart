@@ -49,6 +49,8 @@ class Session extends ChangeNotifier {
   RoomService? _service;
   StreamSubscription<RoomSnapshot>? _room;
   bool tvMode = false;
+  bool onHome = false;
+  String? selectedAddress;
   Future<void> toggleTvMode() async {
     tvMode = !tvMode;
     notifyListeners();
@@ -67,10 +69,46 @@ class Session extends ChangeNotifier {
     if (notify) notifyListeners();
   }
 
-  void local({int players = 1, bool timeTrial = false}) => _set(
-    SessionState(local: true, localPlayers: players, timeTrial: timeTrial),
-  );
+  void home() {
+    if (state.local) {
+      final existing = _service;
+      _set(
+        existing == null
+            ? const SessionState()
+            : SessionState(
+                room: existing.snapshot,
+                code: existing.code,
+                addresses: existing.addresses,
+              ),
+        notify: false,
+      );
+    }
+    onHome = true;
+    notifyListeners();
+  }
+
+  void local({int players = 1, bool timeTrial = false}) {
+    onHome = false;
+    _set(
+      SessionState(local: true, localPlayers: players, timeTrial: timeTrial),
+    );
+  }
+
   Future<void> open({bool timeTrial = false}) async {
+    if (state.busy) return;
+    onHome = false;
+    final existing = _service;
+    if (existing != null) {
+      _set(
+        SessionState(
+          timeTrial: timeTrial,
+          room: existing.snapshot,
+          code: existing.code,
+          addresses: existing.addresses,
+        ),
+      );
+      return;
+    }
     _set(SessionState(busy: true, timeTrial: timeTrial));
     try {
       final html = await rootBundle.loadString('assets/controller.html');
@@ -86,10 +124,11 @@ class Session extends ChangeNotifier {
       );
       _service = service;
       await service.create();
-      _room = service.changes.listen(
-        (room) => _set(
+      _room = service.changes.listen((room) {
+        if (state.local) return;
+        _set(
           SessionState(
-            timeTrial: timeTrial,
+            timeTrial: state.timeTrial,
             room: room,
             code: service.code,
             addresses: service.addresses,
@@ -105,8 +144,8 @@ class Session extends ChangeNotifier {
               room.reversed != state.room?.reversed ||
               !listEquals(room.players, state.room?.players) ||
               !mapEquals(room.results, state.room?.results),
-        ),
-      );
+        );
+      });
       _set(
         SessionState(
           timeTrial: timeTrial,
@@ -128,23 +167,32 @@ class Session extends ChangeNotifier {
     bool turbo = false,
     bool mirrored = false,
     bool reversed = false,
-  }) => _service?.configure(
-    laps: laps,
-    track: track,
-    turbo: turbo,
-    mirrored: mirrored,
-    reversed: reversed,
-  );
-  void start() => _service?.start();
+  }) {
+    if (state.local) return;
+    _service?.configure(
+      laps: laps,
+      track: track,
+      turbo: turbo,
+      mirrored: mirrored,
+      reversed: reversed,
+    );
+  }
+
+  List<Driver>? start() {
+    final service = _service;
+    if (service == null || !service.start()) return null;
+    return service.snapshot.players.where((p) => p.connected).toList();
+  }
+
   void countdown(int value) => _service?.advanceCountdown(value);
   void setPaused(bool value) => _service?.setPaused(value);
   void telemetry(Race race) => _service?.telemetry(race);
   Future<void> finish(Race race) {
     if (!race.finished) return Future.value();
-    return _recorded[race] ??= _finish(race);
+    return _recorded[race] ??= _finish(race, state.local ? null : _service);
   }
 
-  Future<void> _finish(Race race) async {
+  Future<void> _finish(Race race, RoomService? service) async {
     await ready;
     try {
       await history.record(race);
@@ -152,17 +200,21 @@ class Session extends ChangeNotifier {
     } catch (_) {
       historyError = 'Resultado disponível nesta sessão, mas não foi salvo neste aparelho.';
     }
-    _service?.finish(race);
+    if (identical(service, _service)) service?.finish(race);
     notifyListeners();
   }
 
   void replay() => _service?.replay();
-  void reset() => _service?.reset();
+  void reset() {
+    if (!state.local) _service?.reset();
+  }
+
   void removeDisconnected() => _service?.removeDisconnected();
   Future<void> leave() async {
     await _room?.cancel();
     await _service?.dispose();
     _service = null;
+    selectedAddress = null;
     _set(const SessionState());
   }
 

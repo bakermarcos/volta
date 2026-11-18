@@ -63,6 +63,19 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    final session = SessionScope.read(context);
+    final room = session.state.room;
+    _address = session.selectedAddress;
+    if (room != null) {
+      _laps = room.totalLaps;
+      _turbo = room.turbo;
+      _mirrored = room.mirrored;
+      _reversed = room.reversed;
+      _circuit = Circuit.catalog.firstWhere(
+        (c) => c.name == room.circuit,
+        orElse: () => _circuit,
+      );
+    }
     WidgetsBinding.instance.addObserver(this);
     FocusManager.instance.addListener(_revealFocus);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -100,15 +113,18 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) {
-      _keys.clear();
-      if (Platform.isAndroid &&
-          _race != null &&
-          !_race!.finished &&
-          !_paused &&
-          _countdown == 0) {
-        _pause();
-      }
+    if (state == AppLifecycleState.resumed) return;
+    _keys.clear();
+    // inactive fires for a transient focus change and used to leave the
+    // pause panel stranded on the home screen.
+    if ((state == AppLifecycleState.paused ||
+            state == AppLifecycleState.hidden) &&
+        Platform.isAndroid &&
+        _race != null &&
+        !_race!.finished &&
+        !_paused &&
+        _countdown == 0) {
+      _pause();
     }
   }
 
@@ -138,7 +154,14 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
 
   void _advance(double seconds) {
     if (!mounted) return;
-    final dt = seconds.isFinite ? seconds.clamp(0.0, .05) : 0.0;
+    final dt = seconds.isFinite ? seconds.clamp(0.0, .2) : 0.0;
+    final steps = math.max(1, (dt / .05).ceil());
+    for (var i = 0; i < steps; i++) {
+      _advanceStep(dt / steps);
+    }
+  }
+
+  void _advanceStep(double dt) {
     final session = SessionScope.read(context).state;
     final room = session.room;
     if (!session.local && room?.status == 'countdown' && _race == null) {
@@ -170,7 +193,6 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
       if (_intro == 1) {
         _countdown = 3;
         _audio.count(3);
-        if (!session.local) SessionScope.read(context).start();
       }
       setState(() {});
       return;
@@ -277,11 +299,11 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   }
 
   void _requestPause() {
-    if (_paused ||
-        _race == null ||
-        _race!.finished ||
-        _countdown > 0 ||
-        _intro < 1) {
+    if (_paused) {
+      _resumeRace();
+      return;
+    }
+    if (_race == null || _race!.finished || _countdown > 0 || _intro < 1) {
       return;
     }
     if (_pauseArmed) {
@@ -296,63 +318,98 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _pause() async {
-    if (_paused || _race == null || _race!.finished) return;
-    _paused = true;
+  void _pause() {
+    if (_paused || _race == null || _race!.finished || !mounted) return;
     _pauseRequestTimer?.cancel();
-    _pauseArmed = false;
     _audio.pause();
     SessionScope.read(context).setPaused(true);
     _keys.clear();
-    final leave = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: const Color(0x33000000),
-      builder: (context) => AlertDialog(
-        backgroundColor: ink.withValues(alpha: .5),
-        title: const Text('Corrida pausada'),
-        content: StatefulBuilder(
-          builder: (context, setDialog) => Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('Os carros estão parados. Pronto para continuar?'),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Música'),
-                value: _music,
-                onChanged: (value) {
-                  _music = value;
-                  _audio.music = value;
-                  setDialog(() {});
-                },
+    setState(() {
+      _paused = true;
+      _pauseArmed = false;
+    });
+  }
+
+  void _resumeRace() {
+    if (!_paused || !mounted) return;
+    setState(() => _paused = false);
+    SessionScope.read(context).setPaused(false);
+    _audio.resume();
+    _focus.requestFocus();
+  }
+
+  void _leaveRace() {
+    SessionScope.read(context).reset();
+    setState(() {
+      _race = null;
+      _paused = false;
+      _pauseArmed = false;
+      _countdown = 0;
+      _sceneLive = false;
+      _keys.clear();
+    });
+    _audio.menu();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focusLobby());
+  }
+
+  Widget _pausePanel() {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: const Color(0x99000000),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Material(
+              color: ink,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Corrida pausada',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Os carros estão parados. Pronto para continuar?',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Música',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      value: _music,
+                      onChanged: (value) {
+                        setState(() => _music = value);
+                        _audio.music = value;
+                      },
+                    ),
+                    FilledButton(
+                      autofocus: true,
+                      onPressed: _resumeRace,
+                      child: const Text('Continuar'),
+                    ),
+                    TextButton(
+                      onPressed: _leaveRace,
+                      child: const Text('Sair da corrida'),
+                    ),
+                  ],
+                ),
               ),
-            ],
+            ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sair da corrida'),
-          ),
-          FilledButton(
-            autofocus: true,
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Continuar'),
-          ),
-        ],
       ),
     );
-    if (!mounted) return;
-    _paused = false;
-    SessionScope.read(context).setPaused(false);
-    if (leave == true) {
-      await SessionScope.read(context).leave();
-    } else {
-      _audio.resume();
-      _focus.requestFocus();
-    }
   }
 
   @override
@@ -460,6 +517,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
+                  if (_paused && !race.finished) _pausePanel(),
                 ],
               ),
             ),
@@ -470,7 +528,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) SessionScope.read(context).leave();
+        if (!didPop) SessionScope.read(context).home();
       },
       child: KeyboardListener(
         focusNode: _focus,
@@ -500,7 +558,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                           child: const Text('Histórico'),
                         ),
                         TextButton(
-                          onPressed: () => SessionScope.read(context).leave(),
+                          onPressed: () => SessionScope.read(context).home(),
                           child: const Text('Voltar'),
                         ),
                       ],
@@ -572,16 +630,12 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                                         (session.local ||
                                             room?.canStart == true)
                                     ? () {
-                                        if (session.local) {
-                                          setState(() => _begin(players));
-                                        } else {
-                                          setState(
-                                            () => _begin(
-                                              players
-                                                  .where((p) => p.connected)
-                                                  .toList(),
-                                            ),
-                                          );
+                                        final drivers = session.local
+                                            ? players
+                                            : SessionScope.read(context)
+                                                  .start();
+                                        if (drivers != null) {
+                                          setState(() => _begin(drivers));
                                         }
                                       }
                                     : null,
@@ -874,7 +928,10 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                       child: Text(Uri.parse(address).host),
                     ),
                 ],
-                onChanged: (address) => setState(() => _address = address),
+                onChanged: (address) => setState(() {
+                  _address = address;
+                  SessionScope.read(context).selectedAddress = address;
+                }),
               ),
             ExcludeFocus(
               child: SelectableText(
@@ -930,23 +987,6 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
               ),
           ],
           const SizedBox(height: 24),
-          if (race?.finished == true)
-            FilledButton(
-              onPressed: session.busy
-                  ? null
-                  : () async {
-                      if (!session.local) {
-                        SessionScope.read(context).reset();
-                      }
-                      if (mounted &&
-                          (session.local ||
-                              SessionScope.read(context).state.error == null)) {
-                        setState(() => _race = null);
-                        _audio.menu();
-                      }
-                    },
-              child: const Text('Voltar ao lobby  →'),
-            ),
           if (race?.finished == true && session.error != null && !session.local)
             TextButton(
               onPressed: () => SessionScope.read(context).finish(race!),
@@ -1194,9 +1234,6 @@ class _RaceSettingsScreenState extends State<_RaceSettingsScreen> {
                     const SizedBox(height: 12),
                     SwitchListTile(
                       title: const Text('Música'),
-                      subtitle: const Text(
-                        'Desliga a trilha e mantém motor, drift e batidas. Música de MintoDog. Derrapagem de Tom Haigh (CC BY 3.0).',
-                      ),
                       value: music,
                       onChanged: (value) {
                         setState(() => music = value);
@@ -1205,21 +1242,16 @@ class _RaceSettingsScreenState extends State<_RaceSettingsScreen> {
                     ),
                     SwitchListTile(
                       title: const Text('Modo turbo'),
-                      subtitle: const Text('Karts 40% mais rápidos'),
                       value: turbo,
                       onChanged: (value) => setState(() => turbo = value),
                     ),
                     SwitchListTile(
                       title: const Text('Sentido inverso'),
-                      subtitle: const Text('Corra no sentido contrário'),
                       value: reversed,
                       onChanged: (value) => setState(() => reversed = value),
                     ),
                     SwitchListTile(
                       title: const Text('Espelhar traçado'),
-                      subtitle: const Text(
-                        'Troque curvas à esquerda e à direita',
-                      ),
                       value: mirrored,
                       onChanged: (value) => setState(() => mirrored = value),
                     ),

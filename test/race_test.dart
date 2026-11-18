@@ -5,6 +5,47 @@ import 'package:volta/game/race.dart';
 
 void main() {
   const drivers = [Driver('a', 'A', 0), Driver('b', 'B', 1)];
+  test('track pickups scale with length and grant three effects', () {
+    for (final outcome in [0, 1, 2]) {
+      final seed = Iterable<int>.generate(20)
+          .firstWhere((i) => math.Random(i).nextInt(3) == outcome);
+      final race = Race(drivers, random: math.Random(seed));
+      final pickup = race.pickups[1];
+      final angle = math.pi / 2;
+      final heading = race.circuit.heading(angle);
+      final [car, rival] = race.cars;
+      car
+        ..x = pickup.x
+        ..y = pickup.y
+        ..trackAngle = angle
+        ..boostCharge = 0;
+      rival
+        ..x = pickup.x + math.cos(heading) * 100
+        ..y = pickup.y + math.sin(heading) * 100
+        ..trackAngle = car.trackAngle;
+      race.step(.02, {}, hold: true);
+      expect(pickup.availableAt, 0);
+      race.step(.02, {});
+      expect(pickup.availableAt, closeTo(8.02, .001));
+      switch (outcome) {
+        case 0:
+          expect(car.boostCharge, 1);
+        case 1:
+          expect(rival.slowedUntil, closeTo(2.02, .001));
+        case 2:
+          expect(car.surgeUntil, closeTo(1.27, .001));
+      }
+      race.step(.02, {});
+      expect(pickup.availableAt, closeTo(8.02, .001));
+    }
+    expect(Race(drivers, timeTrial: true).pickups, isEmpty);
+    final longTrack = Circuit.catalog.reduce(
+      (a, b) => a.length > b.length ? a : b,
+    );
+    expect(Race(drivers).pickups, hasLength(9));
+    expect(Race(drivers, circuit: longTrack).pickups, hasLength(36));
+  });
+
   void holdOnRoad(Race race, ControlInput input, double seconds) {
     final car = race.cars.first;
     for (final other in race.cars.skip(1)) {

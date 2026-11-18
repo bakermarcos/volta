@@ -100,6 +100,36 @@ void main() {
     room.advanceCountdown(0);
   }
 
+  test('colors are reserved across joins and race resets', () async {
+    final a = await join('Ana');
+    final chosen = room.changes.firstWhere(
+      (state) => state.players.single.paletteIndex == 1,
+    );
+    a.send({'type': 'look', 'color': 1, 'model': 2});
+    await chosen;
+    final b = await join('Bia');
+    final before = room.snapshot.players.last.paletteIndex;
+    expect(before, isNot(1));
+
+    b.send({'type': 'look', 'color': 1, 'model': 1});
+    b.send({'type': 'ping'});
+    await b.next('pong');
+    expect(room.snapshot.players.last.paletteIndex, before);
+    expect(room.snapshot.players.last.model, 1);
+
+    final code = room.code;
+    final address = room.addresses.first;
+    await startReady();
+    room.setPaused(true);
+    room.reset();
+    expect(room.code, code);
+    expect(room.addresses.first, address);
+    expect(room.snapshot.players.map((p) => p.id), [a.token, b.token]);
+    expect(room.snapshot.players.every((p) => p.connected && !p.ready), isTrue);
+    a.send({'type': 'ping'});
+    await a.next('pong');
+  });
+
   test(
     'solo requires readiness and blocks inputs until the countdown ends',
     () async {
