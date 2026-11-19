@@ -31,14 +31,41 @@ class RoomSnapshot {
   final Map<String, Map<String, Object>> inputs, results;
 }
 
-class RoomService {
+abstract interface class RoomHost {
+  bool get connected;
+  RoomSnapshot get snapshot;
+  Stream<RoomSnapshot> get changes;
+  String get code;
+  List<String> get addresses;
+  void configure({
+    required int laps,
+    required String track,
+    required bool turbo,
+    required bool mirrored,
+    required bool reversed,
+  });
+  bool start();
+  void advanceCountdown(int value);
+  void setPaused(bool value);
+  bool takeItemRequest(String id);
+  void telemetry(Race race);
+  void finish(Race race);
+  void replay();
+  void reset();
+  void removeDisconnected();
+  Future<void> dispose();
+}
+
+class RoomService implements RoomHost {
   RoomService(
     this.controllerHtml, {
     this.history,
     this.httpsDirectory,
     this.kartModel = const [],
     this.characterModel = const [],
+    this.handleExtraRequest,
   });
+  final Future<bool> Function(HttpRequest)? handleExtraRequest;
   final Directory? httpsDirectory;
   HttpServer? _secureServer;
   final Map<String, Object> Function()? history;
@@ -48,11 +75,14 @@ class RoomService {
   final _players = <String, Driver>{};
   final _sockets = <String, WebSocket>{};
   final _itemRequests = <String>{};
+  @override
   bool takeItemRequest(String id) => _itemRequests.remove(id);
   final _inputs = <String, Map<String, Object>>{};
   final _results = <String, Map<String, Object>>{};
   final _random = Random.secure();
   HttpServer? _server;
+  @override
+  bool get connected => _server != null && !_closed;
   String status = 'lobby';
   int countdown = 0;
   bool paused = false;
@@ -62,8 +92,11 @@ class RoomService {
   final _lastResults = <String, Map<String, Object>>{};
   final _pauseRequests = <String, DateTime>{};
   bool _closed = false;
+  @override
   String code = '';
+  @override
   List<String> addresses = [];
+  @override
   RoomSnapshot get snapshot => RoomSnapshot(
     status: status,
     countdown: countdown,
@@ -77,6 +110,7 @@ class RoomService {
     inputs: Map.of(_inputs),
     results: Map.of(_results),
   );
+  @override
   Stream<RoomSnapshot> get changes => _changes.stream;
   String _token(int length) => List.generate(
     length,
@@ -193,6 +227,7 @@ class RoomService {
       return;
     }
     if (request.method != 'GET' || request.uri.path != '/$code') {
+      if (await handleExtraRequest?.call(request) == true) return;
       request.response.statusCode = HttpStatus.notFound;
     } else {
       request.response.headers.contentType = ContentType.html;
@@ -340,6 +375,7 @@ class RoomService {
           }
           if (decoded['type'] == 'item' && status == 'racing' && !paused) {
             _itemRequests.add(id!);
+            if (handleExtraRequest != null) _changes.add(snapshot);
             return;
           }
           if (decoded['type'] != 'input' || status != 'racing' || paused) {
@@ -422,6 +458,7 @@ class RoomService {
     }
   }
 
+  @override
   void configure({
     required int laps,
     required String track,
@@ -450,6 +487,7 @@ class RoomService {
     _publish();
   }
 
+  @override
   bool start() {
     if (!snapshot.canStart) return false;
     status = 'countdown';
@@ -463,6 +501,7 @@ class RoomService {
     return true;
   }
 
+  @override
   void advanceCountdown(int value) {
     if (status != 'countdown' || value >= countdown) return;
     countdown = value.clamp(0, 3);
@@ -479,6 +518,7 @@ class RoomService {
     }
   }
 
+  @override
   void setPaused(bool value) {
     if (status != 'racing' || paused == value) return;
     paused = value;
@@ -488,58 +528,31 @@ class RoomService {
     _publish();
   }
 
-  void telemetry(Race race) {
-    final standings = race.standings;
-    for (final car in race.cars) {
-      _sockets[car.driver.id]?.add(
-        jsonEncode({
-          'type': 'telemetry',
-          'speed': car.speed.round(),
-          'charge': car.boostCharge,
-          'boosting': car.boosting,
-          'item': car.item?.label,
-          'itemIcon': car.item?.icon,
-          if (race.elapsed < car.powerNoticeUntil) 'power': car.powerNotice,
-          'lap': car.laps,
-          'totalLaps': race.totalLaps,
-          'wrongWay': () {
-            final track = race.circuit.heading(car.trackAngle);
-            final delta = atan2(
-              sin(car.heading - track),
-              cos(car.heading - track),
-            );
-            return delta.abs() > pi / 2 && car.speed.abs() > 30;
-          }(),
-          'finishingIn': race.finishingIn,
-          'rank': standings.indexOf(car) + 1,
-          'raceTime': car.raceTime(race.elapsed),
-          'lapTime': car.lapTime(race.elapsed),
-          if (car.bestLap != null) 'bestLap': car.bestLap!,
-        }),
-      );
+  @override
+  void telemetry(Race race) => sendTelemetry(raceTelemetry(race));
+
+  void sendTelemetry(Map<String, Map<String, Object?>> payload) {
+    for (final entry in payload.entries) {
+      _sockets[entry.key]?.add(jsonEncode(entry.value));
     }
   }
 
-  void finish(Race race) {
+  @override
+  void finish(Race race) => finishWithResults(raceResults(race));
+
+  void finishWithResults(Map<String, Map<String, Object>> results) {
     status = 'finished';
     paused = false;
-    final standings = race.standings;
-    for (var i = 0; i < standings.length; i++) {
-      final car = standings[i];
-      _results[car.driver.id] = {
-        'rank': i + 1,
-        'time': car.finishedAt ?? 0,
-        'retired': car.retired,
-        'laps': car.lapTimes,
-        if (car.bestLap != null) 'bestLap': car.bestLap!,
-      };
-    }
+    _results
+      ..clear()
+      ..addAll(results);
     _lastResults
       ..clear()
       ..addAll(_results);
     _publish();
   }
 
+  @override
   void replay() {
     status = 'countdown';
     countdown = 3;
@@ -551,6 +564,7 @@ class RoomService {
     _publish();
   }
 
+  @override
   void reset() {
     status = 'lobby';
     countdown = 0;
@@ -565,12 +579,14 @@ class RoomService {
     _publish();
   }
 
+  @override
   void removeDisconnected() {
     if (status != 'lobby') return;
     _players.removeWhere((id, player) => !player.connected);
     _publish();
   }
 
+  @override
   Future<void> dispose() async {
     if (_closed) return;
     _closed = true;
@@ -582,4 +598,49 @@ class RoomService {
     await _secureServer?.close(force: true);
     await _changes.close();
   }
+}
+
+Map<String, Map<String, Object?>> raceTelemetry(Race race) {
+  final standings = race.standings;
+  return {
+    for (final car in race.cars)
+      car.driver.id: {
+        'type': 'telemetry',
+        'speed': car.speed.round(),
+        'charge': car.boostCharge,
+        'boosting': car.boosting,
+        'item': car.item?.label,
+        'itemIcon': car.item?.icon,
+        if (race.elapsed < car.powerNoticeUntil) 'power': car.powerNotice,
+        'lap': car.laps,
+        'totalLaps': race.totalLaps,
+        'wrongWay': () {
+          final track = race.circuit.heading(car.trackAngle);
+          final delta = atan2(
+            sin(car.heading - track),
+            cos(car.heading - track),
+          );
+          return delta.abs() > pi / 2 && car.speed.abs() > 30;
+        }(),
+        'finishingIn': race.finishingIn,
+        'rank': standings.indexOf(car) + 1,
+        'raceTime': car.raceTime(race.elapsed),
+        'lapTime': car.lapTime(race.elapsed),
+        if (car.bestLap != null) 'bestLap': car.bestLap!,
+      },
+  };
+}
+
+Map<String, Map<String, Object>> raceResults(Race race) {
+  final standings = race.standings;
+  return {
+    for (final (i, car) in standings.indexed)
+      car.driver.id: {
+        'rank': i + 1,
+        'time': car.finishedAt ?? 0,
+        'retired': car.retired,
+        'laps': car.lapTimes,
+        if (car.bestLap != null) 'bestLap': car.bestLap!,
+      },
+  };
 }

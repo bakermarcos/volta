@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_scene/scene.dart' as s;
@@ -46,7 +47,7 @@ class _RaceSceneState extends State<RaceScene> {
   s.InstancedMesh? _pickupMesh, _pickupMarks;
   final _pickupVisibility = <bool>[];
   final _hazardNodes = <TrackHazard, s.Node>{};
-  bool get _tvBudget => Platform.isAndroid;
+  bool get _tvBudget => (!kIsWeb && Platform.isAndroid);
   bool get _boundedHorizon =>
       _tvBudget && !const bool.fromEnvironment('VOLTA_FULL_DRAW');
   late final Race _preview;
@@ -1369,7 +1370,7 @@ class _RaceSceneState extends State<RaceScene> {
     }
     _frames++;
     const capture = String.fromEnvironment('VOLTA_CAPTURE');
-    if (capture.isNotEmpty && _frames == 90 && !_capturing) {
+    if (!kIsWeb && capture.isNotEmpty && _frames == 90 && !_capturing) {
       _capturing = true;
       _capture(capture);
     }

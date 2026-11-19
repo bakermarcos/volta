@@ -12,10 +12,15 @@ import 'package:volta/main.dart';
 import 'package:volta/ui/race_scene.dart';
 
 void main() {
-  testWidgets(
-    'TV mode asks the Mac window for fullscreen and can be switched off',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
+    testWidgets('TV mode toggles fullscreen on ${platform.name}', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = platform;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final calls = <MethodCall>[];
       const channel = MethodChannel('volta/window');
@@ -38,8 +43,8 @@ void main() {
       expect(calls.last.arguments, false);
       await tester.pumpWidget(const SizedBox());
       debugDefaultTargetPlatformOverride = null;
-    },
-  );
+    });
+  }
   testWidgets(
     'solo lobby reuses scene, counts down and confirms pause on second click',
     (tester) async {

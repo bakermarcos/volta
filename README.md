@@ -4,9 +4,9 @@
   <img src="assets/volta_logo.png" alt="volta" width="480">
 </p>
 
-A **3D arcade race for 1 to 6 people**, with a split screen on a Mac or an Android TV and controls in each phone's browser. The game device runs one race and shows a camera behind each driver's kart. Flutter Scene 0.24.3 renders the scene on the GPU.
+A **3D arcade race for 1 to 6 people**, with a split screen on a Mac, Windows PC, Linux PC, Android TV, or desktop browser and controls in each phone's browser. The game device runs one race and shows a camera behind each driver's kart. Flutter Scene 0.24.3 renders the scene on the GPU.
 
-The TV or the Mac draws the race. Each person joins from the phone browser, on the same Wi-Fi, with nothing to install. The connection is a local WebSocket. Up to six drivers fit.
+The host draws the race. Each person joins from the phone browser on the same Wi-Fi using a local WebSocket. Up to six drivers fit. The browser build supports keyboard play and can host phones through the LAN relay.
 
 ## Support
 
@@ -26,9 +26,9 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 ```
 
 1. Put the Mac and the phones on the same Wi-Fi.
-2. On the Mac or the TV, tap **Começar**. Allow local network access if macOS asks. TV install steps are in [docs/install.md](docs/install.md).
+2. On the host, tap **Começar**. Allow local network access if the OS asks. See [installation instructions for every platform](docs/install.md).
 3. Tap the track name to pick one of the 16 reference layouts or Ilha Brisa.
-4. Read the QR with the phone's normal camera and open the address in Safari or Chrome. You can also type the full address shown on the Mac.
+4. Read the QR with the phone's normal camera and open the address in Safari or Chrome. You can also type the full address shown on the host.
 5. Type a name on the phone and tap **Estou pronto**. When everyone is ready, click **Largar**. You can race alone.
 6. The start waits for the track to load, moves the camera in with **Pronto**, and only then counts 3, 2, 1. The controller is already open during the count: holding the accelerator keeps the car staged, and it leaves when the count ends. If the kart heads against the track, the screen and the phone show **Contra mão**.
 
@@ -50,9 +50,9 @@ The race uses the whole screen: two views for two players; three or four views i
 
 ## Local connection
 
-The Mac serves the controller page over HTTP and receives the buttons over WebSocket. There is no Firebase, no account, no phone install, no internet requirement, and no external service. Commands and connections stay in memory. Results are saved in a JSON file on the Mac. Only the controls cross the network: the whole simulation and every camera stay on the Mac.
+The native host or browser relay serves the controller page over HTTP and receives inputs over WebSocket. Each camera and the race simulation run on the host. Commands and connections stay in memory. Races are stored on the host, including in browser storage for the web build.
 
-The QR holds a local address with a random code. Each driver gets a token, and commands stay bound to that connection. Position, boost energy, and results are computed on the Mac. Telemetry sent to the phone is only that driver's own state, at most five times a second. The simulation advances on the same tick as the 3D scene. Inputs update state without rebuilding the menus on every packet.
+The QR holds a local address with a random code. Each driver gets a token, and commands stay bound to that connection. Position, boost energy, and results are computed on the host. Telemetry sent to the phone is only that driver's own state, at most five times a second. The simulation advances on the same tick as the 3D scene. Inputs update state without rebuilding the menus on every packet.
 
 Controls are rate-limited, with a heartbeat every 300 ms. A command with no update for 1.8 s is neutralized. Disconnecting makes the car brake. The same browser can return to the same kart for up to 15 s before it is dropped. **Sair** frees the slot. **Remover desconectados**, in the lobby, frees slots whose pages were closed.
 
@@ -60,9 +60,9 @@ If there is more than one network interface, pick the Wi-Fi IP in the lobby. Gue
 
 ## Local history
 
-**Histórico** on the Mac and **Histórico de corridas** on the controller page show the track, date, standings, times, and retirements. The board totals races and wins by name, ignoring case. Use the same name. A race where everyone left assigns no win. Races stopped before the finish are not recorded.
+**Histórico** on the host and **Histórico de corridas** on the controller page show the track, date, standings, times, and retirements. The board totals races and wins by name, ignoring case. Use the same name. A race where everyone left assigns no win. Races stopped before the finish are not recorded.
 
-`races.json` lives in `Library/Application Support/volta/` inside the app's directory on the Mac. With the sandbox, that is `~/Library/Containers/com.homegame.volta/Data/Library/Application Support/volta/`. It survives quitting the app and opening new rooms. The write uses a temporary file and replaces the real file only after it finishes. The page reads history from the Mac while the room is open, including before anyone joins. Nothing is sent to the cloud.
+`races.json` lives in `Library/Application Support/volta/` inside the app's directory on the Mac. With the sandbox, that is `~/Library/Containers/com.homegame.volta/Data/Library/Application Support/volta/`. It survives quitting the app and opening new rooms. The write uses a temporary file and replaces the real file only after it finishes. The controller can read history while the room is open, including before anyone joins. See [desktop and browser storage locations](docs/install.md). Nothing is sent to the cloud.
 
 Tracks use asphalt 240 units wide, enough for four karts of about 31 units with room to spare. The layout is scaled until its edges, including a separation margin, no longer cross. Asphalt, grass, and tires share the same height. Paint uses depth layers.
 
@@ -134,6 +134,6 @@ The project `volta-home-game-2026` was created before the decision to use only t
 
 ## Research
 
-Three ideas were studied and are not implemented: a DualShock 4 read from the phone page, track power-ups, and drift that charges the boost. The notes are in [docs/research.md](docs/research.md).
+The research notes cover DualShock 4 input from the phone page, fixed boost pads, and charging boost by drifting. Those are still future work. v0.3 implements mystery boxes and held items. The notes are in [docs/research.md](docs/research.md).
 
 Who can merge `master`, and who can update the other branches, is in [docs/repository.md](docs/repository.md).

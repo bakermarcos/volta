@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../game/race.dart';
 import 'room_service.dart';
 import 'race_history.dart';
+import 'browser_platform.dart';
 
 class SessionState {
   const SessionState({
@@ -46,7 +47,7 @@ class Session extends ChangeNotifier {
   }
 
   SessionState state = const SessionState();
-  RoomService? _service;
+  RoomHost? _service;
   StreamSubscription<RoomSnapshot>? _room;
   bool tvMode = false;
   bool onHome = false;
@@ -54,7 +55,18 @@ class Session extends ChangeNotifier {
   Future<void> toggleTvMode() async {
     tvMode = !tvMode;
     notifyListeners();
-    if (defaultTargetPlatform == TargetPlatform.macOS) {
+    if (kIsWeb) {
+      try {
+        await setBrowserFullscreen(tvMode);
+      } catch (_) {
+        tvMode = !tvMode;
+        notifyListeners();
+      }
+      return;
+    }
+    if (defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux) {
       try {
         await const MethodChannel('volta/window')
             .invokeMethod<void>('fullscreen', tvMode);
@@ -111,20 +123,29 @@ class Session extends ChangeNotifier {
     }
     _set(SessionState(busy: true, timeTrial: timeTrial));
     try {
-      final html = await rootBundle.loadString('assets/controller.html');
-      final kart = await rootBundle.load('assets/karts/kart_low_poly.glb');
-      final character = await rootBundle.load('assets/karts/kart-oobi.glb');
-      await ready;
-      final service = RoomService(
-        html,
-        kartModel: kart.buffer.asUint8List(),
-        characterModel: character.buffer.asUint8List(),
-        history: () => history.snapshot,
-        httpsDirectory: Directory('${history.file.parent.path}/https'),
-      );
+      final service = kIsWeb
+          ? await connectBrowserRoom()
+          : await _openLocalRoom();
       _service = service;
-      await service.create();
+      if (kIsWeb) {
+        await ready;
+        syncBrowserHistory(service, history.snapshot);
+      }
       _room = service.changes.listen((room) {
+        if (!service.connected) {
+          _service = null;
+          _room?.cancel();
+          service.dispose();
+          if (!state.local) {
+            onHome = true;
+            _set(
+              const SessionState(
+                error: 'A conexão com o servidor foi encerrada.',
+              ),
+            );
+          }
+          return;
+        }
         if (state.local) return;
         _set(
           SessionState(
@@ -161,6 +182,27 @@ class Session extends ChangeNotifier {
     }
   }
 
+  Future<RoomService> _openLocalRoom() async {
+    final html = await rootBundle.loadString('assets/controller.html');
+    final kart = await rootBundle.load('assets/karts/kart_low_poly.glb');
+    final character = await rootBundle.load('assets/karts/kart-oobi.glb');
+    await ready;
+    final service = RoomService(
+      html,
+      kartModel: kart.buffer.asUint8List(),
+      characterModel: character.buffer.asUint8List(),
+      history: () => history.snapshot,
+      httpsDirectory: Directory('${history.file.parent.path}/https'),
+    );
+    try {
+      await service.create();
+      return service;
+    } catch (_) {
+      await service.dispose();
+      rethrow;
+    }
+  }
+
   void configureRace(
     int laps,
     String track, {
@@ -193,7 +235,7 @@ class Session extends ChangeNotifier {
     return _recorded[race] ??= _finish(race, state.local ? null : _service);
   }
 
-  Future<void> _finish(Race race, RoomService? service) async {
+  Future<void> _finish(Race race, RoomHost? service) async {
     await ready;
     try {
       await history.record(race);
@@ -201,7 +243,10 @@ class Session extends ChangeNotifier {
     } catch (_) {
       historyError = 'Resultado disponível nesta sessão, mas não foi salvo neste aparelho.';
     }
-    if (identical(service, _service)) service?.finish(race);
+    if (service != null && identical(service, _service)) {
+      if (kIsWeb) syncBrowserHistory(service, history.snapshot);
+      service.finish(race);
+    }
     notifyListeners();
   }
 

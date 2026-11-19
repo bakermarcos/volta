@@ -1,23 +1,42 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../game/race.dart';
+import 'browser_platform.dart';
 
 class RaceHistory {
-  RaceHistory({File? file})
-    : file =
-          file ??
-          File(
-            '${Platform.environment['HOME']!}/Library/Application Support/volta/races.json',
-          );
+  RaceHistory({File? file}) : _providedFile = file;
 
-  final File file;
+  final File? _providedFile;
+
+  static File _defaultFile() {
+    final env = Platform.environment;
+    final home = env['HOME'] ?? env['USERPROFILE'] ?? Directory.systemTemp.path;
+    final dataRoot = switch (Platform.operatingSystem) {
+      'windows' => env['LOCALAPPDATA'] ?? '$home/AppData/Local',
+      'linux' =>
+        env['XDG_DATA_HOME']?.startsWith('/') == true
+            ? env['XDG_DATA_HOME']!
+            : '$home/.local/share',
+      _ => '$home/Library/Application Support',
+    };
+    return File('$dataRoot/volta/races.json');
+  }
+
+  late final File file = _providedFile ?? _defaultFile();
   final races = <Map<String, dynamic>>[];
   Future<void> _pending = Future.value();
 
   Future<void> load() async {
-    if (!await file.exists()) return;
-    final data = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    final contents = kIsWeb
+        ? readBrowserHistory()
+        : await file.exists()
+        ? await file.readAsString()
+        : null;
+    if (contents == null) return;
+    final data = jsonDecode(contents) as Map<String, dynamic>;
     races.addAll((data['races'] as List).cast<Map<String, dynamic>>());
   }
 
@@ -72,6 +91,10 @@ class RaceHistory {
     });
     final contents = jsonEncode({'version': 1, 'races': races});
     final write = _pending.then((_) async {
+      if (kIsWeb) {
+        writeBrowserHistory(contents);
+        return;
+      }
       await file.parent.create(recursive: true);
       final temporary = File('${file.path}.tmp');
       await temporary.writeAsString(contents, flush: true);

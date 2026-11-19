@@ -1,6 +1,6 @@
 # Install and play
 
-The game device is a Mac or an Android TV. Phones join through the browser, on the same Wi-Fi, with nothing to install. The build that counts for playing is the release build.
+Volta can host a game on Android TV, macOS, Windows, Linux, or in a desktop browser. Phones join through the browser, on the same Wi-Fi, with nothing to install. The build that counts for playing is the release build.
 
 ## Android TV
 
@@ -28,9 +28,49 @@ flutter run -d macos --release
 
 `flutter run` without `--release` is for development. Playable smoothness is the release build.
 
+## Windows and Linux
+
+Use the pinned Flutter 3.47.2 toolchain, and build each desktop target from its own OS. Both runners enable Flutter GPU for Flutter Scene.
+
+| OS | Build setup | Release bundle |
+| --- | --- | --- |
+| Windows | Visual Studio with Desktop development with C++ and the Windows SDK | `build/windows/x64/runner/Release` |
+| Linux | Clang, CMake, Ninja, pkg-config, GTK 3 and GStreamer development packages | `build/linux/x64/release/bundle` |
+
+On Windows, run `flutter build windows --release`, then launch `volta.exe` from the bundle. Keep the bundled DLLs and data directory together. If Windows asks about accepting incoming connections for phone controllers, allow Volta on your private Wi-Fi network. [Flutter Windows setup](https://docs.flutter.dev/platform-integration/windows/setup)
+
+On Ubuntu or Debian, install the build and audio packages and run the Linux build.
+
+```sh
+sudo apt-get install clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good gstreamer1.0-libav
+flutter build linux --release
+build/linux/x64/release/bundle/volta
+```
+
+Distribute the full bundle directory. Launch it from a graphical session. [Flutter Linux setup](https://docs.flutter.dev/platform-integration/linux/setup)
+
+**Modo TV** toggles fullscreen. Race history uses `%LOCALAPPDATA%/volta/races.json` on Windows and `$XDG_DATA_HOME/volta/races.json` or `~/.local/share/volta/races.json` on Linux. The host workflow builds downloadable bundles in GitHub Actions when run.
+
+## Browser
+
+Build with Flutter, and serve the bundle over HTTP. Use a desktop browser with WebGL 2 and a keyboard. A static deployment supports one or two keyboard players, fullscreen, and local history per browser origin.
+
+```sh
+flutter build web --release --no-web-resources-cdn
+python3 -m http.server 8080 --bind 127.0.0.1 --directory build/web
+```
+
+Open `http://localhost:8080`. For phone controllers, run Volta's local relay instead of the static file server.
+
+```sh
+dart run tool/serve_web.dart
+```
+
+Keep the relay running. Open the private host URL it prints for the Wi-Fi interface shared with the phones, select **Começar**, and show the lobby QR to the players. The relay defaults to port 8765 and accepts an optional port argument. Keep the private host URL for the race browser. The phone QR grants player access. This relay is intended for a trusted local network. Phone tilt over HTTPS on iPhone remains available through the native host setup described in the README.
+
 ## Join the race
 
-1. Put the TV or Mac and the phones on the same Wi-Fi. A guest network that isolates devices will not connect.
+1. Put the host and the phones on the same Wi-Fi. A guest network that isolates devices will not connect.
 2. Tap **Começar**. For a solo lap against the clock, use **Tempo na pista**. Both open a room and a QR code.
 3. Point the phone camera at the QR, or type the address shown on the screen.
 4. Type a name and tap **Estou pronto**. **Largar** unlocks when everyone is ready. You can race alone.

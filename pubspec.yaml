@@ -11,6 +11,7 @@ dependencies:
   hooks: ^2.2.0
   audioplayers: ^6.5.0
   qr: ^4.0.1
+  web: ^1.1.2
   vector_math: ^2.4.4
 dev_dependencies:
   flutter_test:

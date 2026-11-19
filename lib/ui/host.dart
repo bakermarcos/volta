@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -63,6 +64,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
   bool _music = true;
   bool _lastLap = false;
   double _banner = 0;
+  bool _openingCountdown = false;
   @override
   void initState() {
     super.initState();
@@ -132,7 +134,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     // pause panel stranded on the home screen.
     if ((state == AppLifecycleState.paused ||
             state == AppLifecycleState.hidden) &&
-        Platform.isAndroid &&
+        (!kIsWeb && Platform.isAndroid) &&
         _race != null &&
         !_race!.finished &&
         !_paused &&
@@ -473,6 +475,21 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
     final connected = players.where((p) => p.connected).length;
     final race = _race;
     final tvMode = SessionScope.read(context).tvMode;
+    if (!session.local &&
+        room?.status == 'countdown' &&
+        race == null &&
+        !_openingCountdown) {
+      _openingCountdown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _openingCountdown = false;
+        if (!mounted || _race != null) return;
+        final current = SessionScope.read(context).state.room;
+        if (current?.status != 'countdown') return;
+        setState(
+          () => _begin(current!.players.where((p) => p.connected).toList()),
+        );
+      });
+    }
     if (race != null) {
       return KeyboardListener(
         focusNode: _focus,
@@ -595,7 +612,7 @@ class _HostScreenState extends State<HostScreen> with WidgetsBindingObserver {
                       children: [
                         const VoltaMark(height: 34),
                         const Spacer(),
-                        if (!Platform.isAndroid)
+                        if (kIsWeb || !Platform.isAndroid)
                           TextButton(
                             onPressed: SessionScope.read(context).toggleTvMode,
                             child: Text(tvMode ? 'Sair do modo TV' : 'Modo TV'),

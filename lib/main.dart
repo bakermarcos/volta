@@ -2,17 +2,20 @@ import 'dart:io';
 
 import 'room/race_history.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'room/session.dart';
+import 'room/browser_platform.dart';
 import 'ui/host.dart';
 import 'ui/track.dart';
 import 'ui/history.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (Platform.isAndroid) {
+  initializeBrowserPlatform();
+  if ((!kIsWeb && Platform.isAndroid)) {
     final path = await const MethodChannel('volta/storage')
         .invokeMethod<String>('directory');
     await SystemChrome.setPreferredOrientations([
@@ -153,7 +156,8 @@ class EntryScreen extends StatelessWidget {
     final session = SessionScope.watch(context);
     final state = session.state;
     if (state.active && !session.onHome) return const HostScreen();
-    final android = Platform.isAndroid;
+    final android = !kIsWeb && Platform.isAndroid;
+    final keyboardOnly = kIsWeb && !canHostBrowserRoom;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -169,18 +173,22 @@ class EntryScreen extends StatelessWidget {
                 children: [
                   const VoltaMark(height: 64),
                   SizedBox(height: android ? 12 : 16),
-                  const Text(
-                    'Uma pista. Seus amigos.\nConectem os celulares ao mesmo Wi-Fi.',
+                  Text(
+                    keyboardOnly ? 'Uma pista. Jogue com o teclado.' : 'Uma pista. Seus amigos.\nConectem os celulares ao mesmo Wi-Fi.',
                     style: TextStyle(fontSize: 18, color: muted, height: 1.6),
                   ),
                   SizedBox(height: android ? 20 : 40),
                   FilledButton(
                     autofocus: true,
-                    onPressed: state.busy ? null : session.open,
+                    onPressed: state.busy
+                        ? null
+                        : keyboardOnly
+                        ? session.local
+                        : session.open,
                     child: Text(state.busy ? 'Abrindo…' : 'Começar'),
                   ),
                   SizedBox(height: android ? 8 : 12),
-                  if (!android)
+                  if (!android && !keyboardOnly)
                     TextButton(
                       onPressed: state.busy ? null : session.local,
                       child: const Text('Treinar com teclado'),
@@ -197,7 +205,9 @@ class EntryScreen extends StatelessWidget {
                   TextButton(
                     onPressed: state.busy
                         ? null
-                        : () => session.open(timeTrial: true),
+                        : () => keyboardOnly
+                              ? session.local(timeTrial: true)
+                              : session.open(timeTrial: true),
                     child: const Text('Tempo na pista'),
                   ),
                   TextButton(
@@ -213,8 +223,10 @@ class EntryScreen extends StatelessWidget {
                       ),
                     ),
                   SizedBox(height: android ? 16 : 40),
-                  const Text(
-                    '1–6 pilotos · 2 voltas',
+                  Text(
+                    keyboardOnly
+                        ? '1–2 pilotos · 2 voltas'
+                        : '1–6 pilotos · 2 voltas',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: muted),
                   ),

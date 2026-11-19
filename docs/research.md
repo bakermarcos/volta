@@ -1,6 +1,6 @@
 # Research
 
-Three ideas, none of them implemented: reading a DualShock 4 from the phone page, putting power-ups on the track, and letting a drift charge the boost. None of this is in the game now. The browser facts were checked against the sources at the end, on 6 November 2026. Where this project did not measure the behavior, the text says so.
+Historical research from November 2026. v0.3 now ships mystery boxes with held items. The earlier automatic box concept below is retained for context. Fixed boost pads, DualShock 4 support in the phone page, and drift charging remain unimplemented. Browser facts in the controller section were checked on 6 November 2026.
 
 ## Bluetooth controller on the phone
 
